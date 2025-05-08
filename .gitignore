@@ -1,0 +1,30 @@
+# Node modules
+node_modules/
+
+# Builds (caso use electron-builder ou electron-packager no futuro)
+dist/
+out/
+release/
+
+# Logs e cache
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.cache/
+
+# Banco de dados e backups criptografados
+*.sqlite
+*.db
+*.enc
+*.bak
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Ambiente e credenciais
+.env
+*.key
+*.pem
+*.crt
