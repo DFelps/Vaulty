@@ -1,20 +1,58 @@
 {
-  "name": "vaulty",
+  "name": "vaulty-pro",
   "version": "1.0.0",
-  "main": "main.js",
+  "description": "Vaulty - gerenciador de senhas local com Electron + Vue",
+  "author": "object1ve",
+  "main": "electron/main.js",
+  "license": "MIT",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "electron ."
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "build:web": "vite build",
+    "build": "vite build",
+    "start": "electron .",
+    "dist": "vite build && electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "electron": "^36.1.0",
-    "sqlite3": "^5.1.7"
+    "better-sqlite3": "^11.7.0",
+    "electron-store": "^10.0.1",
+    "lucide-vue-next": "^1.0.0",
+    "vue": "^3.5.13"
   },
   "devDependencies": {
-    "electron-reload": "^2.0.0-alpha.1"
+    "@vitejs/plugin-vue": "^5.2.1",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^36.1.0",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.2.6",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.object1ve.vaultypro",
+    "productName": "Vaulty",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }
