@@ -1,6 +1,28 @@
 <!-- src/App.vue -->
 <template>
   <div class="app-shell">
+    <div class="window-titlebar">
+      <div class="window-drag-area">
+        <div class="window-brand">
+          <ShieldCheck :size="16" />
+          <span>Vaulty</span>
+        </div>
+      </div>
+
+      <div class="window-controls no-drag">
+        <button class="window-control-btn" @click="minimizeWindow" aria-label="Minimizar">
+          <Minus :size="16" />
+        </button>
+        <button class="window-control-btn" @click="toggleMaximizeWindow" aria-label="Maximizar">
+          <Square v-if="!isMaximized" :size="15" />
+          <Copy v-else :size="15" />
+        </button>
+        <button class="window-control-btn danger" @click="closeWindow" aria-label="Fechar">
+          <X :size="16" />
+        </button>
+      </div>
+    </div>
+
     <header class="topbar">
       <div>
         <div class="brand-row">
@@ -42,36 +64,27 @@
       </div>
     </header>
 
-    <main class="layout">
+    <main class="layout" :class="{ 'locked-layout': !unlocked && statusLoaded && status.hasVault }">
       <section v-if="!statusLoaded" class="panel centered-panel">
         <p>Carregando cofre...</p>
       </section>
 
       <section v-else-if="!status.hasVault" class="panel auth-panel">
+        <div class="auth-hero-icon">
+          <ShieldCheck :size="36" />
+        </div>
         <h2>Criar cofre</h2>
-        <p class="muted">Defina sua chave mestra. Ela será usada para proteger todos os seus itens.</p>
+        <p class="muted auth-copy">Defina sua chave mestra. Ela será usada para proteger todos os seus itens localmente.</p>
 
         <form class="form-grid" @submit.prevent="handleCreateVault">
           <label>
             <span>Chave mestra</span>
-            <input
-              v-model="createForm.masterPassword"
-              type="password"
-              minlength="8"
-              required
-              placeholder="No mínimo 8 caracteres"
-            />
+            <input v-model="createForm.masterPassword" type="password" minlength="8" required placeholder="No mínimo 8 caracteres" />
           </label>
 
           <label>
             <span>Confirmar chave</span>
-            <input
-              v-model="createForm.confirmPassword"
-              type="password"
-              minlength="8"
-              required
-              placeholder="Digite novamente"
-            />
+            <input v-model="createForm.confirmPassword" type="password" minlength="8" required placeholder="Digite novamente" />
           </label>
 
           <button class="primary-btn full-width">
@@ -81,27 +94,37 @@
         </form>
       </section>
 
-      <section v-else-if="!unlocked" class="panel auth-panel">
-        <h2>Desbloquear cofre</h2>
-        <p class="muted">Digite sua chave mestra para acessar seus itens.</p>
-        <p v-if="lockReason" class="warning-text">{{ lockReason }}</p>
+      <section v-else-if="!unlocked" class="auth-stage">
+        <div class="auth-stage-copy">
+          <div class="auth-hero-icon large">
+            <LockKeyhole :size="42" />
+          </div>
+          <h2>Acesse seu cofre</h2>
+          <p>Seus dados permanecem criptografados localmente e só são liberados com sua chave mestra.</p>
+        </div>
 
-        <form class="form-grid" @submit.prevent="handleUnlock">
-          <label>
-            <span>Chave mestra</span>
-            <input
-              v-model="unlockPassword"
-              type="password"
-              required
-              placeholder="Sua chave mestra"
-            />
-          </label>
+        <div class="panel auth-panel auth-panel-locked">
+          <h3>Desbloquear cofre</h3>
+          <p class="muted auth-copy">Digite sua chave mestra para acessar seus itens.</p>
+          <p v-if="lockReason" class="warning-text">{{ lockReason }}</p>
 
-          <button class="primary-btn full-width">
-            <LockKeyhole :size="18" />
-            <span>Desbloquear</span>
-          </button>
-        </form>
+          <form class="form-grid" @submit.prevent="handleUnlock">
+            <label>
+              <span>Chave mestra</span>
+              <input v-model="unlockPassword" type="password" required placeholder="Sua chave mestra" autofocus />
+            </label>
+
+            <button class="primary-btn full-width">
+              <LockKeyhole :size="18" />
+              <span>Desbloquear</span>
+            </button>
+          </form>
+
+          <div class="auth-footer-note">
+            <ShieldCheck :size="16" />
+            <span>Seu cofre é bloqueado automaticamente por inatividade e ao minimizar a janela.</span>
+          </div>
+        </div>
       </section>
 
       <template v-else>
@@ -122,24 +145,14 @@
 
           <label>
             <span>Buscar</span>
-            <input
-              v-model="search"
-              type="text"
-              placeholder="Título, email, site, nota..."
-            />
+            <input v-model="search" type="text" placeholder="Título, email, site, nota..." />
           </label>
 
           <label>
             <span>Categoria</span>
             <select v-model="selectedCategory">
               <option value="">Todas</option>
-              <option
-                v-for="category in categories"
-                :key="category"
-                :value="category"
-              >
-                {{ category }}
-              </option>
+              <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
             </select>
           </label>
 
@@ -161,10 +174,7 @@
           <div class="content-header">
             <div>
               <h2>Itens protegidos</h2>
-              <p class="muted">
-                Sessão ativa libera ações sensíveis até o bloqueio automático após
-                {{ AUTO_LOCK_MINUTES }} min.
-              </p>
+              <p class="muted">Sessão ativa libera ações sensíveis até o bloqueio automático após {{ AUTO_LOCK_MINUTES }} min.</p>
             </div>
           </div>
 
@@ -174,11 +184,7 @@
           </div>
 
           <div v-else class="credential-list">
-            <article
-              v-for="item in filteredCredentials"
-              :key="item.id"
-              class="credential-card"
-            >
+            <article v-for="item in filteredCredentials" :key="item.id" class="credential-card">
               <div class="credential-main">
                 <div>
                   <h3>{{ item.title }}</h3>
@@ -192,35 +198,24 @@
                       <span>{{ typeLabel(item.itemType) }}</span>
                     </span>
 
-                    <a
-                      v-if="item.website"
-                      :href="item.website"
-                      target="_blank"
-                      rel="noreferrer"
-                      class="credential-link"
-                    >
+                    <button v-if="item.website" type="button" class="credential-link link-button" @click="openWebsite(item.website)">
                       <LinkIcon :size="14" />
                       <span>{{ item.website }}</span>
-                    </a>
+                    </button>
                   </div>
                 </div>
               </div>
 
               <div class="secret-box">
                 <template v-if="item.itemType === 'password'">
-                  <input
-                    :type="visiblePasswords[item.id] ? 'text' : 'password'"
-                    :value="visiblePasswords[item.id] ? (revealedPasswords[item.id] || '') : passwordPlaceholder"
-                    readonly
-                  />
-
+                  <input :type="visiblePasswords[item.id] ? 'text' : 'password'" :value="visiblePasswords[item.id] ? (revealedPasswords[item.id] || '') : passwordPlaceholder" readonly />
                   <button class="ghost-btn small" @click="toggleVisibility(item.id)">
                     <component :is="visiblePasswords[item.id] ? EyeOff : Eye" :size="16" />
                     <span>{{ visiblePasswords[item.id] ? 'Ocultar' : 'Mostrar' }}</span>
                   </button>
                 </template>
 
-                <template v-else-if="item.itemType === 'text'">
+                <template v-else>
                   <div class="preview-box">
                     <p>{{ item.hasSecretText ? 'Texto protegido disponível' : 'Sem texto protegido' }}</p>
                   </div>
@@ -230,34 +225,15 @@
                     <span>Abrir texto</span>
                   </button>
                 </template>
-
-                <template v-else>
-                  <div class="preview-box">
-                    <p>{{ item.attachmentCount || 0 }} arquivo(s) protegido(s)</p>
-                  </div>
-
-                  <button class="ghost-btn small" @click="openEditModal(item)">
-                    <Paperclip :size="16" />
-                    <span>Ver arquivos</span>
-                  </button>
-                </template>
               </div>
 
               <div class="card-actions">
-                <button
-                  v-if="item.username || item.email"
-                  class="secondary-btn small"
-                  @click="copyText(item.username || item.email)"
-                >
+                <button v-if="item.username || item.email" class="secondary-btn small" @click="copyText(item.username || item.email)">
                   <Copy :size="16" />
                   <span>Copiar login</span>
                 </button>
 
-                <button
-                  v-if="item.itemType === 'password'"
-                  class="secondary-btn small"
-                  @click="copyPassword(item.id)"
-                >
+                <button v-if="item.itemType === 'password'" class="secondary-btn small" @click="copyPassword(item.id)">
                   <KeyRound :size="16" />
                   <span>Copiar senha</span>
                 </button>
@@ -294,21 +270,12 @@
         <form class="form-grid two-columns" @submit.prevent="saveCredential">
           <label>
             <span>Título</span>
-            <input
-              v-model="form.title"
-              type="text"
-              required
-              placeholder="Ex.: GitHub / Documento / Anotação"
-            />
+            <input v-model="form.title" type="text" required placeholder="Ex.: GitHub / Documento / Anotação" />
           </label>
 
           <label>
             <span>Categoria</span>
-            <input
-              v-model="form.category"
-              type="text"
-              placeholder="Ex.: Trabalho"
-            />
+            <input v-model="form.category" type="text" placeholder="Ex.: Trabalho" />
           </label>
 
           <label>
@@ -316,59 +283,39 @@
             <select v-model="form.itemType">
               <option value="password">Senha</option>
               <option value="text">Texto longo</option>
-              <option value="file">Arquivo</option>
             </select>
           </label>
 
-          <label>
+          <label class="toggle-row">
+            <span>Possui website</span>
+            <input v-model="form.hasWebsite" type="checkbox" class="toggle-checkbox" />
+          </label>
+
+          <label v-if="shouldShowWebsiteField()" class="full-span">
             <span>Website</span>
-            <input
-              v-model="form.website"
-              type="url"
-              placeholder="https://site.com"
-            />
+            <input v-model="form.website" type="url" placeholder="https://site.com" />
           </label>
 
           <label v-if="form.itemType === 'password'">
             <span>Usuário</span>
-            <input
-              v-model="form.username"
-              type="text"
-              placeholder="Login"
-            />
+            <input v-model="form.username" type="text" placeholder="Login" />
           </label>
 
           <label v-if="form.itemType === 'password'">
             <span>Email</span>
-            <input
-              v-model="form.email"
-              type="email"
-              placeholder="email@exemplo.com"
-            />
+            <input v-model="form.email" type="email" placeholder="email@exemplo.com" />
           </label>
 
           <label class="full-span">
             <span>Notas rápidas</span>
-            <textarea
-              v-model="form.notes"
-              rows="3"
-              placeholder="Descrição curta para busca e organização"
-            ></textarea>
+            <textarea v-model="form.notes" rows="3" placeholder="Descrição curta para busca e organização"></textarea>
           </label>
 
           <label v-if="form.itemType === 'password'" class="full-span">
             <span>Senha</span>
             <div class="inline-row">
-              <input
-                v-model="form.password"
-                type="text"
-                placeholder="Senha"
-              />
-              <button
-                type="button"
-                class="secondary-btn"
-                @click="form.password = generatePassword()"
-              >
+              <input v-model="form.password" type="text" placeholder="Senha" />
+              <button type="button" class="secondary-btn" @click="form.password = generatePassword()">
                 <Sparkles :size="16" />
                 <span>Gerar</span>
               </button>
@@ -377,64 +324,8 @@
 
           <label v-if="form.itemType === 'text'" class="full-span">
             <span>Texto seguro longo</span>
-            <textarea
-              v-model="form.secretText"
-              rows="12"
-              placeholder="Guarde anotações longas, códigos, respostas de segurança, chaves, observações privadas..."
-            ></textarea>
+            <textarea v-model="form.secretText" rows="12" placeholder="Guarde anotações longas, códigos, respostas de segurança, chaves, observações privadas..."></textarea>
           </label>
-
-          <div v-if="form.itemType === 'file'" class="full-span attachment-block">
-            <div class="attachment-label-row">
-              <span class="attachment-title">Arquivos anexos</span>
-
-              <label class="file-picker-btn">
-                <Paperclip :size="16" />
-                <span>Adicionar arquivos</span>
-                <input type="file" multiple @change="handleFileSelection" />
-              </label>
-            </div>
-
-            <p class="muted attachment-help">
-              Ideal para arquivos pequenos. Eles ficam criptografados junto com o item.
-            </p>
-
-            <div v-if="form.attachments.length" class="attachment-list">
-              <div
-                v-for="(attachment, index) in form.attachments"
-                :key="`${attachment.name}-${index}`"
-                class="attachment-item"
-              >
-                <div class="attachment-meta">
-                  <Paperclip :size="16" />
-                  <div>
-                    <strong>{{ attachment.name }}</strong>
-                    <span>{{ formatBytes(attachment.size || 0) }}</span>
-                  </div>
-                </div>
-
-                <div class="attachment-actions">
-                  <button
-                    type="button"
-                    class="ghost-btn small"
-                    @click="downloadAttachment(attachment)"
-                  >
-                    <Download :size="16" />
-                    <span>Baixar</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    class="danger-btn small"
-                    @click="removeAttachment(index)"
-                  >
-                    <Trash2 :size="16" />
-                    <span>Remover</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
 
           <button class="primary-btn full-span">
             <Save :size="18" />
@@ -447,7 +338,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Copy,
   Download,
@@ -459,12 +350,13 @@ import {
   Link as LinkIcon,
   Lock,
   LockKeyhole,
-  Paperclip,
+  Minus,
   Pencil,
   Plus,
   Save,
   ShieldCheck,
   Sparkles,
+  Square,
   Trash2,
   Upload,
   X
@@ -474,7 +366,7 @@ const AUTO_LOCK_MINUTES = 5
 const AUTO_LOCK_MS = AUTO_LOCK_MINUTES * 60 * 1000
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 const passwordPlaceholder = '••••••••••••••••'
-const MAX_FILE_SIZE = 5 * 1024 * 1024
+const CLIPBOARD_CLEAR_SECONDS = 20
 
 const statusLoaded = ref(false)
 const status = ref({ hasVault: false, unlocked: false })
@@ -491,6 +383,10 @@ const visiblePasswords = reactive({})
 const revealedPasswords = reactive({})
 const sessionEndsAt = ref(null)
 const sessionSecondsLeft = ref(0)
+const clipboardClearTimer = ref(null)
+const isMaximized = ref(false)
+let detachForcedLockListener = null
+let detachWindowStateListener = null
 
 const createForm = reactive({
   masterPassword: '',
@@ -504,11 +400,11 @@ const emptyForm = () => ({
   email: '',
   password: '',
   website: '',
+  hasWebsite: false,
   category: '',
   notes: '',
   secretText: '',
-  itemType: 'password',
-  attachments: []
+  itemType: 'password'
 })
 
 const form = reactive(emptyForm())
@@ -518,10 +414,23 @@ let countdownTimer = null
 let listenersBound = false
 let lastActivityTs = 0
 
-const categories = computed(() => {
-  return [...new Set(credentials.value.map((item) => item.category).filter(Boolean))].sort()
+watch(() => form.itemType, (type) => {
+  if (type !== 'password') {
+    form.username = ''
+    form.email = ''
+    form.password = ''
+  }
+
+  if (type !== 'text') {
+    form.secretText = ''
+  }
+
+  if (type !== 'password' && !form.hasWebsite) {
+    form.website = ''
+  }
 })
 
+const categories = computed(() => [...new Set(credentials.value.map((item) => item.category).filter(Boolean))].sort())
 const categoriesCount = computed(() => categories.value.length)
 
 const filteredCredentials = computed(() => {
@@ -529,14 +438,7 @@ const filteredCredentials = computed(() => {
 
   return credentials.value.filter((item) => {
     const matchesCategory = !selectedCategory.value || item.category === selectedCategory.value
-    const haystack = [
-      item.title,
-      item.username,
-      item.email,
-      item.website,
-      item.category,
-      item.notes
-    ]
+    const haystack = [item.title, item.username, item.email, item.website, item.category, item.notes]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -560,12 +462,31 @@ function setToast(message) {
   }, 2600)
 }
 
+function clearClipboardTimer() {
+  if (clipboardClearTimer.value) {
+    window.clearTimeout(clipboardClearTimer.value)
+    clipboardClearTimer.value = null
+  }
+}
+
+async function scheduleClipboardClear() {
+  clearClipboardTimer()
+  clipboardClearTimer.value = window.setTimeout(async () => {
+    try {
+      const current = await navigator.clipboard.readText()
+      if (current) {
+        await navigator.clipboard.writeText('')
+        setToast('Área de transferência limpa automaticamente.')
+      }
+    } catch {}
+  }, CLIPBOARD_CLEAR_SECONDS * 1000)
+}
+
 function clearIdleTimers() {
   if (idleTimer) {
     window.clearTimeout(idleTimer)
     idleTimer = null
   }
-
   if (countdownTimer) {
     window.clearInterval(countdownTimer)
     countdownTimer = null
@@ -577,11 +498,7 @@ function updateCountdown() {
     sessionSecondsLeft.value = 0
     return
   }
-
-  sessionSecondsLeft.value = Math.max(
-    0,
-    Math.ceil((sessionEndsAt.value - Date.now()) / 1000)
-  )
+  sessionSecondsLeft.value = Math.max(0, Math.ceil((sessionEndsAt.value - Date.now()) / 1000))
 }
 
 async function handleAutoLock() {
@@ -605,10 +522,8 @@ function scheduleAutoLock() {
 
 function markActivity() {
   if (!unlocked.value) return
-
   const now = Date.now()
   if (now - lastActivityTs < 750) return
-
   lastActivityTs = now
   scheduleAutoLock()
 }
@@ -639,7 +554,6 @@ function unbindActivityListeners() {
 
 function handleVisibilityChange() {
   if (!unlocked.value) return
-
   if (document.visibilityState === 'visible') {
     markActivity()
   }
@@ -666,12 +580,10 @@ async function refreshStatus() {
 
 async function loadCredentials() {
   const result = await window.vaulty.listCredentials()
-
   if (Array.isArray(result)) {
     credentials.value = result
     return
   }
-
   if (result?.success === false) {
     setToast(result.error)
   }
@@ -684,7 +596,6 @@ async function handleCreateVault() {
   }
 
   const result = await window.vaulty.createVault(createForm.masterPassword)
-
   if (result.success === false) {
     setToast(result.error)
     return
@@ -702,7 +613,6 @@ async function handleCreateVault() {
 
 async function handleUnlock() {
   const result = await window.vaulty.unlock(unlockPassword.value)
-
   if (result.success === false) {
     setToast(result.error)
     return
@@ -719,6 +629,7 @@ async function handleUnlock() {
 async function lockVault(reason = '') {
   await window.vaulty.lock()
   stopSessionTracking()
+  clearClipboardTimer()
   unlocked.value = false
   credentials.value = []
   search.value = ''
@@ -739,13 +650,11 @@ function resetForm() {
 
 function typeLabel(type) {
   if (type === 'text') return 'Texto longo'
-  if (type === 'file') return 'Arquivo'
   return 'Senha'
 }
 
 function typeIcon(type) {
   if (type === 'text') return FileText
-  if (type === 'file') return Paperclip
   return KeyRound
 }
 
@@ -757,9 +666,7 @@ function openCreateModal() {
 
 async function openEditModal(item) {
   markActivity()
-
   const result = await window.vaulty.getCredentialForEdit(item.id)
-
   if (result?.success === false) {
     setToast(result.error)
     return
@@ -768,11 +675,8 @@ async function openEditModal(item) {
   Object.assign(form, {
     ...emptyForm(),
     ...result.credential,
-    attachments: Array.isArray(result.credential.attachments)
-      ? result.credential.attachments
-      : []
+    hasWebsite: Boolean(result.credential.website)
   })
-
   showModal.value = true
 }
 
@@ -788,15 +692,13 @@ async function saveCredential() {
     id: form.id,
     title: (form.title || '').trim(),
     category: form.category || '',
-    website: form.website || '',
+    website: shouldShowWebsiteField() ? (form.website || '') : '',
     notes: form.notes || '',
     itemType: form.itemType || 'password',
-
     username: '',
     email: '',
     password: '',
-    secretText: '',
-    attachments: []
+    secretText: ''
   }
 
   if (!payload.title) {
@@ -814,14 +716,7 @@ async function saveCredential() {
     payload.secretText = form.secretText || ''
   }
 
-  if (payload.itemType === 'file') {
-    payload.attachments = Array.isArray(form.attachments)
-      ? form.attachments
-      : []
-  }
-
   const result = await window.vaulty.saveCredential(payload)
-
   if (result?.success === false) {
     setToast(result.error || 'Erro ao salvar item.')
     return
@@ -834,12 +729,10 @@ async function saveCredential() {
 
 async function removeCredential(id) {
   markActivity()
-
   const confirmed = window.confirm('Excluir este item?')
   if (!confirmed) return
 
   const result = await window.vaulty.deleteCredential(id)
-
   if (result.success === false) {
     setToast(result.error)
     return
@@ -847,7 +740,6 @@ async function removeCredential(id) {
 
   delete visiblePasswords[id]
   delete revealedPasswords[id]
-
   await loadCredentials()
   setToast('Item excluído.')
 }
@@ -856,7 +748,6 @@ async function ensurePasswordLoaded(id) {
   if (revealedPasswords[id]) return revealedPasswords[id]
 
   const result = await window.vaulty.revealPassword(id)
-
   if (result?.success === false) {
     setToast(result.error)
     return ''
@@ -868,51 +759,46 @@ async function ensurePasswordLoaded(id) {
 
 async function toggleVisibility(id) {
   markActivity()
-
   if (!visiblePasswords[id]) {
     const password = await ensurePasswordLoaded(id)
     if (!password) return
     visiblePasswords[id] = true
     return
   }
-
   visiblePasswords[id] = false
 }
 
 async function copyPassword(id) {
   markActivity()
-
   const password = await ensurePasswordLoaded(id)
-
   if (!password) {
     setToast('Nenhuma senha encontrada para este item.')
     return
   }
 
   await navigator.clipboard.writeText(password)
-  setToast('Senha copiada para a área de transferência.')
+  setToast(`Senha copiada. A área de transferência será limpa em ${CLIPBOARD_CLEAR_SECONDS}s.`)
+  await scheduleClipboardClear()
 }
 
 async function copyText(value) {
   markActivity()
-
   if (!value) {
     setToast('Nada para copiar.')
     return
   }
 
   await navigator.clipboard.writeText(value)
-  setToast('Copiado para a área de transferência.')
+  setToast(`Copiado. A área de transferência será limpa em ${CLIPBOARD_CLEAR_SECONDS}s.`)
+  await scheduleClipboardClear()
 }
 
 function generatePassword(size = 20) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*_-+='
   let out = ''
-
   crypto.getRandomValues(new Uint32Array(size)).forEach((n) => {
     out += chars[n % chars.length]
   })
-
   return out
 }
 
@@ -930,82 +816,62 @@ async function exportBackup() {
 async function importBackup() {
   markActivity()
   const result = await window.vaulty.importBackup()
-
   if (result?.success) {
     await loadCredentials()
     setToast(`${result.imported} item(ns) importado(s).`)
   }
 }
 
-function formatBytes(bytes) {
-  if (!bytes) return '0 B'
+function shouldShowWebsiteField() {
+  return form.itemType === 'password' || form.hasWebsite
+}
 
-  const units = ['B', 'KB', 'MB', 'GB']
-  let index = 0
-  let value = bytes
-
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024
-    index += 1
+async function openWebsite(url) {
+  if (!url) return
+  const result = await window.vaulty.openExternal(url)
+  if (result?.success === false) {
+    setToast(result.error || 'Não foi possível abrir o link.')
   }
-
-  return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`
 }
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-
-    reader.onload = () => {
-      const result = String(reader.result || '')
-      const base64 = result.includes(',') ? result.split(',')[1] : result
-      resolve(base64)
-    }
-
-    reader.onerror = () => reject(new Error(`Falha ao ler o arquivo ${file.name}.`))
-    reader.readAsDataURL(file)
-  })
+async function minimizeWindow() {
+  await window.vaulty.minimizeWindow()
 }
 
-async function handleFileSelection(event) {
-  markActivity()
-
-  const files = Array.from(event.target.files || [])
-  if (!files.length) return
-
-  for (const file of files) {
-    if (file.size > MAX_FILE_SIZE) {
-      setToast(`O arquivo ${file.name} excede o limite de 5 MB.`)
-      continue
-    }
-
-    const base64 = await fileToBase64(file)
-
-    form.attachments.push({
-      name: file.name,
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      data: base64
-    })
+async function toggleMaximizeWindow() {
+  const result = await window.vaulty.toggleMaximizeWindow()
+  if (typeof result?.isMaximized === 'boolean') {
+    isMaximized.value = result.isMaximized
   }
-
-  event.target.value = ''
 }
 
-function removeAttachment(index) {
-  form.attachments.splice(index, 1)
-}
-
-function downloadAttachment(attachment) {
-  const type = attachment.type || 'application/octet-stream'
-  const link = document.createElement('a')
-  link.href = `data:${type};base64,${attachment.data}`
-  link.download = attachment.name || 'arquivo'
-  link.click()
+async function closeWindow() {
+  await window.vaulty.closeWindow()
 }
 
 onMounted(async () => {
   await refreshStatus()
+
+  if (typeof window.vaulty.onForcedLock === 'function') {
+    detachForcedLockListener = window.vaulty.onForcedLock(async (payload) => {
+      await lockVault(payload?.reason || 'Sessão bloqueada pelo sistema.')
+    })
+  }
+
+  if (typeof window.vaulty.onWindowState === 'function') {
+    detachWindowStateListener = window.vaulty.onWindowState((payload) => {
+      if (typeof payload?.isMaximized === 'boolean') {
+        isMaximized.value = payload.isMaximized
+      }
+    })
+  }
+
+  if (typeof window.vaulty.getWindowState === 'function') {
+    const state = await window.vaulty.getWindowState()
+    if (typeof state?.isMaximized === 'boolean') {
+      isMaximized.value = state.isMaximized
+    }
+  }
 
   if (status.value.unlocked) {
     unlocked.value = true
@@ -1016,5 +882,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopSessionTracking()
+  clearClipboardTimer()
+  if (typeof detachForcedLockListener === 'function') detachForcedLockListener()
+  if (typeof detachWindowStateListener === 'function') detachWindowStateListener()
 })
 </script>
