@@ -2,9 +2,11 @@ const fs = require('fs')
 const path = require('path')
 const { dialog, app } = require('electron')
 const { initializeDatabase } = require('./database')
+
 const {
   encryptJson,
   decryptJson,
+  reEncryptJson,
   createVaultMetadata,
   verifyMasterPassword,
   makeSessionKey
@@ -13,15 +15,32 @@ const {
 class VaultService {
   constructor() {
     this.db = initializeDatabase()
+
     this.sessionKey = null
+    this.unlockFailures = []
+    this.unlockBlockedUntil = 0
   }
 
   getStatus() {
-    const row = this.db.prepare('SELECT id FROM vault_meta WHERE id = 1').get()
+    const row = this.db
+      .prepare('SELECT id FROM vault_meta WHERE id = 1')
+      .get()
+
     return {
       hasVault: Boolean(row),
       unlocked: Boolean(this.sessionKey)
     }
+  }
+
+  requireUnlocked() {
+    if (!this.sessionKey) {
+      throw new Error('Cofre bloqueado.')
+    }
+  }
+
+  lock() {
+    this.sessionKey = null
+    return { success: true }
   }
 
   createVault(masterPassword) {
@@ -29,7 +48,10 @@ class VaultService {
       throw new Error('A chave mestra precisa ter pelo menos 8 caracteres.')
     }
 
-    const existing = this.db.prepare('SELECT id FROM vault_meta WHERE id = 1').get()
+    const existing = this.db
+      .prepare('SELECT id FROM vault_meta WHERE id = 1')
+      .get()
+
     if (existing) {
       throw new Error('O cofre já foi criado.')
     }
@@ -37,16 +59,60 @@ class VaultService {
     const meta = createVaultMetadata(masterPassword)
 
     this.db.prepare(`
-      INSERT INTO vault_meta (id, salt, password_hash)
+      INSERT INTO vault_meta (
+        id,
+        salt,
+        password_hash
+      )
       VALUES (1, ?, ?)
-    `).run(meta.salt, meta.passwordHash)
+    `).run(
+      meta.salt,
+      meta.passwordHash
+    )
 
     this.sessionKey = makeSessionKey(masterPassword, meta.salt)
 
     return { success: true }
   }
 
+  registerUnlockFailure() {
+    const now = Date.now()
+
+    this.unlockFailures = this.unlockFailures.filter(
+      (ts) => now - ts < 15 * 60 * 1000
+    )
+
+    this.unlockFailures.push(now)
+
+    if (this.unlockFailures.length >= 5) {
+      this.unlockBlockedUntil = now + 10000
+    } else if (this.unlockFailures.length >= 3) {
+      this.unlockBlockedUntil = now + 3000
+    }
+  }
+
+  clearUnlockFailures() {
+    this.unlockFailures = []
+    this.unlockBlockedUntil = 0
+  }
+
+  assertUnlockNotBlocked() {
+    const now = Date.now()
+
+    if (this.unlockBlockedUntil > now) {
+      const seconds = Math.ceil(
+        (this.unlockBlockedUntil - now) / 1000
+      )
+
+      throw new Error(
+        `Muitas tentativas inválidas. Aguarde ${seconds}s.`
+      )
+    }
+  }
+
   unlock(masterPassword) {
+    this.assertUnlockNotBlocked()
+
     const meta = this.db.prepare(`
       SELECT salt, password_hash
       FROM vault_meta
@@ -64,23 +130,24 @@ class VaultService {
     )
 
     if (!valid) {
+      this.registerUnlockFailure()
       throw new Error('Chave mestra inválida.')
     }
 
-    this.sessionKey = makeSessionKey(masterPassword, meta.salt)
+    this.clearUnlockFailures()
+
+    this.sessionKey = makeSessionKey(
+      masterPassword,
+      meta.salt
+    )
 
     return { success: true }
   }
 
-  lock() {
-    this.sessionKey = null
-    return { success: true }
-  }
-
-  requireUnlocked() {
-    if (!this.sessionKey) {
-      throw new Error('Cofre bloqueado.')
-    }
+  normalizeItemType(type) {
+    return ['password', 'text'].includes(type)
+      ? type
+      : 'password'
   }
 
   getCredentialRow(id) {
@@ -108,28 +175,12 @@ class VaultService {
     }
   }
 
-  normalizeAttachments(raw) {
-    if (!Array.isArray(raw)) return []
-
-    return raw
-      .filter((item) => item && typeof item === 'object')
-      .map((item) => ({
-        name: item.name || 'arquivo',
-        type: item.type || 'application/octet-stream',
-        size: Number(item.size || 0),
-        data: item.data || ''
-      }))
-      .filter((item) => item.data)
-  }
-
-  normalizeItemType(value) {
-    return ['password', 'text', 'file'].includes(value) ? value : 'password'
-  }
-
   toCredentialSummary(row) {
     const secure = this.readSecurePayload(row)
-    const itemType = this.normalizeItemType(secure.itemType)
-    const attachments = this.normalizeAttachments(secure.attachments)
+
+    const itemType = this.normalizeItemType(
+      secure.itemType
+    )
 
     return {
       id: row.id,
@@ -141,7 +192,6 @@ class VaultService {
       notes: row.notes || '',
       itemType,
       hasSecretText: Boolean(secure.secretText),
-      attachmentCount: attachments.length,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }
@@ -149,15 +199,11 @@ class VaultService {
 
   toCredentialFull(row) {
     const secure = this.readSecurePayload(row)
-    const attachments = this.normalizeAttachments(secure.attachments)
-    const itemType = this.normalizeItemType(secure.itemType)
 
     return {
       ...this.toCredentialSummary(row),
-      itemType,
       password: secure.password || '',
-      secretText: secure.secretText || '',
-      attachments
+      secretText: secure.secretText || ''
     }
   }
 
@@ -170,7 +216,9 @@ class VaultService {
       ORDER BY updated_at DESC, id DESC
     `).all()
 
-    return rows.map((row) => this.toCredentialSummary(row))
+    return rows.map((row) =>
+      this.toCredentialSummary(row)
+    )
   }
 
   getCredentialForEdit(id) {
@@ -188,10 +236,17 @@ class VaultService {
     this.requireUnlocked()
 
     const row = this.getCredentialRow(id)
+
     const secure = this.readSecurePayload(row)
 
-    if (this.normalizeItemType(secure.itemType) !== 'password') {
-      return { success: true, password: '' }
+    if (
+      this.normalizeItemType(secure.itemType) !==
+      'password'
+    ) {
+      return {
+        success: true,
+        password: ''
+      }
     }
 
     return {
@@ -207,15 +262,20 @@ class VaultService {
       throw new Error('Informe um título.')
     }
 
-    const itemType = this.normalizeItemType(input.itemType)
+    const itemType = this.normalizeItemType(
+      input.itemType
+    )
 
     const payload = {
       itemType,
-      password: itemType === 'password' ? (input.password || '') : '',
-      secretText: itemType === 'text' ? (input.secretText || '') : '',
-      attachments: itemType === 'file'
-        ? this.normalizeAttachments(input.attachments)
-        : []
+      password:
+        itemType === 'password'
+          ? input.password || ''
+          : '',
+      secretText:
+        itemType === 'text'
+          ? input.secretText || ''
+          : ''
     }
 
     const encrypted = JSON.stringify(
@@ -224,8 +284,15 @@ class VaultService {
 
     const now = new Date().toISOString()
 
-    const username = itemType === 'password' ? (input.username || '') : ''
-    const email = itemType === 'password' ? (input.email || '') : ''
+    const username =
+      itemType === 'password'
+        ? input.username || ''
+        : ''
+
+    const email =
+      itemType === 'password'
+        ? input.email || ''
+        : ''
 
     if (input.id) {
       this.db.prepare(`
@@ -302,7 +369,9 @@ class VaultService {
       FROM credentials
     `).all()
 
-    const entries = rows.map((row) => this.toCredentialFull(row))
+    const entries = rows.map((row) =>
+      this.toCredentialFull(row)
+    )
 
     const backup = encryptJson(
       {
@@ -343,7 +412,10 @@ class VaultService {
       return { success: false }
     }
 
-    const raw = fs.readFileSync(result.filePaths[0], 'utf8')
+    const raw = fs.readFileSync(
+      result.filePaths[0],
+      'utf8'
+    )
 
     const backup = decryptJson(
       JSON.parse(raw),
@@ -362,9 +434,9 @@ class VaultService {
         notes: item.notes || '',
         itemType: this.normalizeItemType(item.itemType),
         password: item.password || '',
-        secretText: item.secretText || '',
-        attachments: this.normalizeAttachments(item.attachments)
+        secretText: item.secretText || ''
       })
+
       imported++
     }
 
