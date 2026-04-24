@@ -161,6 +161,11 @@
             </button>
           </form>
 
+          <button class="ghost-btn full-width recovery-link-btn" @click="openRecoveryModal">
+            <KeyRound :size="16" />
+            <span>Perdi minha chave mestra</span>
+          </button>
+
           <div class="auth-footer-note">
             <ShieldCheck :size="16" />
             <span>
@@ -205,6 +210,28 @@
             <button class="ghost-btn small full-width" @click="openDriveSettings">
               <Settings2 :size="16" />
               <span>Ajustes do Drive</span>
+            </button>
+          </div>
+
+          <div class="recovery-mini panel-mini">
+            <div class="drive-mini-header">
+              <strong>Recuperação</strong>
+              <span :class="recoveryStatus.configured ? 'status-ok' : 'status-warning'">
+                {{ recoveryStatus.configured ? 'Ativa' : 'Pendente' }}
+              </span>
+            </div>
+
+            <p class="muted small-copy">
+              {{
+                recoveryStatus.configured
+                  ? 'Uma chave de recuperação está configurada para este cofre.'
+                  : 'Gere uma chave de recuperação para evitar perda de acesso.'
+              }}
+            </p>
+
+            <button class="ghost-btn small full-width" @click="generateRecoveryKey">
+              <KeyRound :size="16" />
+              <span>{{ recoveryStatus.configured ? 'Gerar nova chave' : 'Gerar chave' }}</span>
             </button>
           </div>
 
@@ -351,6 +378,95 @@
     </main>
 
     <div v-if="toast" class="toast">{{ toast }}</div>
+
+    <div v-if="showRecoveryKeyModal" class="modal-overlay">
+      <section class="modal modal-small">
+        <div class="modal-header">
+          <h3>Chave de recuperação</h3>
+        </div>
+
+        <div class="recovery-key-body">
+          <p class="muted">
+            Guarde esta chave fora do Vaulty. Ela permite recuperar o acesso caso você esqueça a chave mestra.
+          </p>
+
+          <div class="recovery-key-box">
+            <code>{{ generatedRecoveryKey }}</code>
+          </div>
+
+          <p class="warning-text">
+            Esta chave será exibida apenas agora. Quem tiver essa chave poderá redefinir a chave mestra do cofre.
+          </p>
+
+          <div class="drive-reminder-actions">
+            <button class="secondary-btn" @click="copyRecoveryKey">
+              <Copy :size="16" />
+              <span>Copiar chave</span>
+            </button>
+
+            <button class="primary-btn" @click="closeRecoveryKeyModal">
+              <ShieldCheck :size="16" />
+              <span>Já salvei em lugar seguro</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="showRecoveryModal" class="modal-overlay" @click.self="closeRecoveryModal">
+      <section class="modal modal-small">
+        <div class="modal-header">
+          <h3>Recuperar acesso</h3>
+          <button class="ghost-btn small" @click="closeRecoveryModal">
+            <X :size="16" />
+            <span>Fechar</span>
+          </button>
+        </div>
+
+        <form class="form-grid" @submit.prevent="recoverWithRecoveryKey">
+          <p class="muted">
+            Use sua chave de recuperação para definir uma nova chave mestra. Seus itens serão recriptografados com a nova chave.
+          </p>
+
+          <label>
+            <span>Chave de recuperação</span>
+            <textarea
+              v-model="recoveryForm.recoveryKey"
+              rows="3"
+              required
+              placeholder="Cole sua chave de recuperação"
+            ></textarea>
+          </label>
+
+          <label>
+            <span>Nova chave mestra</span>
+            <input
+              v-model="recoveryForm.newMasterPassword"
+              type="password"
+              minlength="8"
+              required
+              placeholder="No mínimo 8 caracteres"
+            />
+          </label>
+
+          <label>
+            <span>Confirmar nova chave</span>
+            <input
+              v-model="recoveryForm.confirmPassword"
+              type="password"
+              minlength="8"
+              required
+              placeholder="Digite novamente"
+            />
+          </label>
+
+          <button class="primary-btn full-width">
+            <KeyRound :size="16" />
+            <span>Redefinir chave mestra</span>
+          </button>
+        </form>
+      </section>
+    </div>
 
     <div v-if="showDriveReminder" class="modal-overlay" @click.self="showDriveReminder = false">
       <section class="modal modal-small">
@@ -626,7 +742,7 @@ import {
   X
 } from 'lucide-vue-next'
 
-const AUTO_LOCK_MINUTES = 3
+const AUTO_LOCK_MINUTES = 5
 const AUTO_LOCK_MS = AUTO_LOCK_MINUTES * 60 * 1000
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 const passwordPlaceholder = '••••••••••••••••'
@@ -652,12 +768,20 @@ const isMaximized = ref(false)
 const showDriveModal = ref(false)
 const showDriveReminder = ref(false)
 const driveSyncing = ref(false)
+const showRecoveryModal = ref(false)
+const showRecoveryKeyModal = ref(false)
+const generatedRecoveryKey = ref('')
+
 
 const driveStatus = reactive({
   configured: false,
   lastSyncAt: '',
   reminderEnabled: true,
   dueNow: false
+})
+
+const recoveryStatus = reactive({
+  configured: false
 })
 
 let detachForcedLockListener = null
@@ -674,6 +798,12 @@ const driveForm = reactive({
   refreshToken: '',
   folderName: 'Vaulty',
   reminderEnabled: true
+})
+
+const recoveryForm = reactive({
+  recoveryKey: '',
+  newMasterPassword: '',
+  confirmPassword: ''
 })
 
 const emptyForm = () => ({
@@ -917,6 +1047,105 @@ async function refreshDriveStatus() {
   }
 }
 
+async function refreshRecoveryStatus() {
+  const result = await window.vaulty.recoveryGetStatus()
+
+  if (result?.success === false) {
+    recoveryStatus.configured = false
+    return
+  }
+
+  recoveryStatus.configured = Boolean(result.hasRecoveryKey)
+}
+
+async function loadRecoveryStatus() {
+  await refreshRecoveryStatus()
+}
+
+async function generateRecoveryKey() {
+  const confirmed = recoveryStatus.configured
+    ? window.confirm('Gerar uma nova chave de recuperação? A chave anterior deixará de funcionar.')
+    : true
+
+  if (!confirmed) return
+
+  const result = await window.vaulty.recoveryGenerateKey()
+
+  if (result?.success === false) {
+    setToast(result.error || 'Não foi possível gerar a chave de recuperação.')
+    return
+  }
+
+  generatedRecoveryKey.value = result.recoveryKey || ''
+  showRecoveryKeyModal.value = true
+  recoveryStatus.configured = true
+
+  await refreshRecoveryStatus()
+
+  setToast('Chave de recuperação gerada.')
+}
+
+function closeRecoveryKeyModal() {
+  generatedRecoveryKey.value = ''
+  showRecoveryKeyModal.value = false
+}
+
+async function copyRecoveryKey() {
+  if (!generatedRecoveryKey.value) return
+
+  await navigator.clipboard.writeText(generatedRecoveryKey.value)
+  setToast(`Chave copiada. A área de transferência será limpa em ${CLIPBOARD_CLEAR_SECONDS}s.`)
+  await scheduleClipboardClear()
+}
+
+function openRecoveryModal() {
+  recoveryForm.recoveryKey = ''
+  recoveryForm.newMasterPassword = ''
+  recoveryForm.confirmPassword = ''
+  showRecoveryModal.value = true
+}
+
+function closeRecoveryModal() {
+  showRecoveryModal.value = false
+  recoveryForm.recoveryKey = ''
+  recoveryForm.newMasterPassword = ''
+  recoveryForm.confirmPassword = ''
+}
+
+async function recoverWithRecoveryKey() {
+  if (recoveryForm.newMasterPassword !== recoveryForm.confirmPassword) {
+    setToast('As novas chaves não conferem.')
+    return
+  }
+
+  const confirmed = window.confirm(
+    'Redefinir a chave mestra usando a chave de recuperação? Seus dados serão recriptografados.'
+  )
+
+  if (!confirmed) return
+
+  const result = await window.vaulty.recoveryRecoverWithKey({
+    recoveryKey: recoveryForm.recoveryKey,
+    newMasterPassword: recoveryForm.newMasterPassword
+  })
+
+  if (result?.success === false) {
+    setToast(result.error || 'Não foi possível recuperar o acesso.')
+    return
+  }
+
+  closeRecoveryModal()
+  unlockPassword.value = ''
+  unlocked.value = true
+  status.value = { hasVault: true, unlocked: true }
+  lockReason.value = ''
+  startSessionTracking()
+  await loadCredentials()
+  await refreshDriveStatus()
+  await refreshRecoveryStatus()
+  setToast('Chave mestra redefinida com sucesso.')
+}
+
 async function openDriveSettings() {
   const result = await window.vaulty.driveGetSettings()
 
@@ -1001,6 +1230,13 @@ async function handleCreateVault() {
   startSessionTracking()
   await loadCredentials()
   await refreshDriveStatus()
+  await refreshRecoveryStatus()
+
+  if (result.recoveryKey) {
+    generatedRecoveryKey.value = result.recoveryKey
+    showRecoveryKeyModal.value = true
+  }
+
   setToast('Cofre criado com sucesso.')
 }
 
@@ -1018,6 +1254,7 @@ async function handleUnlock() {
   startSessionTracking()
   await loadCredentials()
   await refreshDriveStatus()
+  await refreshRecoveryStatus()
   setToast('Cofre desbloqueado.')
 }
 
@@ -1033,6 +1270,9 @@ async function lockVault(reason = '') {
   lockReason.value = reason
   showDriveReminder.value = false
   showDriveModal.value = false
+  showRecoveryModal.value = false
+  showRecoveryKeyModal.value = false
+  generatedRecoveryKey.value = ''
 
   Object.keys(visiblePasswords).forEach((key) => delete visiblePasswords[key])
   Object.keys(revealedPasswords).forEach((key) => delete revealedPasswords[key])
@@ -1265,6 +1505,7 @@ async function closeWindow() {
 
 onMounted(async () => {
   await refreshStatus()
+  await refreshRecoveryStatus()
 
   if (typeof window.vaulty.onForcedLock === 'function') {
     detachForcedLockListener = window.vaulty.onForcedLock(async (payload) => {
@@ -1292,6 +1533,7 @@ onMounted(async () => {
     startSessionTracking()
     await loadCredentials()
     await refreshDriveStatus()
+    await refreshRecoveryStatus()
   }
 })
 

@@ -1,10 +1,15 @@
-const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, shell, Tray, nativeImage } = require('electron')
 const path = require('path')
 const { VaultService } = require('./vault-service')
 
 const isDev = !app.isPackaged
 
+let cachedOpenAtLogin = false
+
 let mainWindow = null
+let tray = null
+let isQuitting = false
+
 const vault = new VaultService()
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
@@ -14,14 +19,7 @@ if (!gotSingleInstanceLock) {
 }
 
 app.on('second-instance', () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore()
-  }
-
-  mainWindow.show()
-  mainWindow.focus()
+  showMainWindow()
 })
 
 function emitForcedLock(reason) {
@@ -42,12 +40,113 @@ function getWindowIcon() {
   return path.join(__dirname, '..', 'build', 'icon.ico')
 }
 
-function createWindow() {
+function getTrayIcon() {
+  const iconPath = getWindowIcon()
+  const icon = nativeImage.createFromPath(iconPath)
+  return icon.isEmpty() ? icon : icon.resize({ width: 16, height: 16 })
+}
+
+function applyLoginSettings(openAtLogin = true) {
+  cachedOpenAtLogin = openAtLogin
+
+  app.setLoginItemSettings({
+    openAtLogin,
+    openAsHidden: true,
+    args: ['--hidden']
+  })
+}
+
+function isOpenAtLoginEnabled() {
+  return cachedOpenAtLogin
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideToTray(reason = 'Sessão bloqueada e enviada para a bandeja.') {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+
+  vault.lock()
+  emitForcedLock(reason)
+  mainWindow.hide()
+}
+
+function updateTrayMenu() {
+  if (!tray) return
+
+  const openAtLogin = isOpenAtLoginEnabled()
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Abrir Vaulty',
+      click: () => showMainWindow()
+    },
+    {
+      label: 'Bloquear cofre',
+      click: () => {
+        vault.lock()
+        emitForcedLock('Cofre bloqueado pela bandeja do sistema.')
+      }
+    },
+    { type: 'separator' },
+    {
+      label: openAtLogin
+        ? 'Iniciar com Windows: ligado'
+        : 'Iniciar com Windows: desligado',
+      click: () => {
+        applyLoginSettings(!openAtLogin)
+        setTimeout(updateTrayMenu, 300)
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Sair',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      }
+    }
+  ])
+
+  tray.setContextMenu(contextMenu)
+}
+
+function createTray() {
+  if (tray) return
+
+  tray = new Tray(getTrayIcon())
+  tray.setToolTip('Vaulty')
+
+  tray.on('click', () => {
+    showMainWindow()
+  })
+
+  tray.on('double-click', () => {
+    showMainWindow()
+  })
+
+  updateTrayMenu()
+}
+
+function createWindow(options = {}) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show()
     mainWindow.focus()
     return
   }
+
+  const startHidden = Boolean(options.startHidden)
 
   mainWindow = new BrowserWindow({
     width: 1220,
@@ -59,6 +158,7 @@ function createWindow() {
     frame: false,
     titleBarStyle: 'hidden',
     icon: getWindowIcon(),
+    show: !startHidden,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -71,9 +171,16 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  mainWindow.on('minimize', () => {
-    vault.lock()
-    emitForcedLock('Sessão bloqueada ao minimizar a janela.')
+  mainWindow.on('minimize', (event) => {
+    event.preventDefault()
+    hideToTray('Sessão bloqueada ao minimizar a janela.')
+  })
+
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return
+
+    event.preventDefault()
+    hideToTray('Sessão bloqueada e enviada para a bandeja.')
   })
 
   mainWindow.on('maximize', emitWindowState)
@@ -92,16 +199,26 @@ function createWindow() {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
-  createWindow()
+
+  cachedOpenAtLogin = app.getLoginItemSettings().openAtLogin
+
+  createTray()
+
+  const startHidden = process.argv.includes('--hidden') && !isDev
+  createWindow({ startHidden })
 
   app.on('activate', () => {
-    createWindow()
+    showMainWindow()
   })
 })
 
-app.on('window-all-closed', () => {
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
+app.on('window-all-closed', (event) => {
   if (process.platform !== 'darwin') {
-    app.quit()
+    event.preventDefault()
   }
 })
 
@@ -135,6 +252,10 @@ ipcMain.handle('drive:saveSettings', handler((_, payload) => vault.saveDriveSett
 ipcMain.handle('drive:getStatus', handler(() => vault.getDriveStatus()))
 ipcMain.handle('drive:syncNow', handler(() => vault.syncDriveNow()))
 
+ipcMain.handle('recovery:getStatus', handler(() => vault.getRecoveryStatus()))
+ipcMain.handle('recovery:generateKey', handler(() => vault.generateRecoveryKey()))
+ipcMain.handle('recovery:recoverWithKey', handler((_, payload) => vault.recoverWithRecoveryKey(payload)))
+
 ipcMain.handle('vault:openExternal', handler(async (_, url) => {
   if (!url || typeof url !== 'string') {
     throw new Error('URL inválida.')
@@ -151,9 +272,7 @@ ipcMain.handle('vault:openExternal', handler(async (_, url) => {
 }))
 
 ipcMain.handle('window:minimize', handler(() => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.minimize()
-  }
+  hideToTray('Sessão bloqueada ao minimizar a janela.')
   return { success: true }
 }))
 
@@ -175,9 +294,7 @@ ipcMain.handle('window:toggleMaximize', handler(() => {
 }))
 
 ipcMain.handle('window:close', handler(() => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.close()
-  }
+  hideToTray('Sessão bloqueada e enviada para a bandeja.')
   return { success: true }
 }))
 

@@ -665,3 +665,37 @@ label span, .muted {
     border-top-right-radius: 24px;
   }
 }
+
+.status-warning {
+  color: #fde68a;
+  font-size: 0.86rem;
+}
+
+.recovery-mini {
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
+.recovery-link-btn {
+  margin-top: 1rem;
+}
+
+.recovery-key-body {
+  display: grid;
+  gap: 1rem;
+}
+
+.recovery-key-box {
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(12, 19, 39, 0.96);
+  border: 1px solid rgba(132, 107, 255, 0.35);
+}
+
+.recovery-key-box code {
+  display: block;
+  color: #ddd6fe;
+  font-size: 1rem;
+  line-height: 1.6;
+  word-break: break-all;
+  user-select: all;
+}

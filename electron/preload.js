@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld('vaulty', {
   driveGetStatus: () => ipcRenderer.invoke('drive:getStatus'),
   driveSyncNow: () => ipcRenderer.invoke('drive:syncNow'),
 
+  recoveryGetStatus: () => ipcRenderer.invoke('recovery:getStatus'),
+  recoveryGenerateKey: () => ipcRenderer.invoke('recovery:generateKey'),
+  recoveryRecoverWithKey: (payload) => ipcRenderer.invoke('recovery:recoverWithKey', payload),
+
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggleMaximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
