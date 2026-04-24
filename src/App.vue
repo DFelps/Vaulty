@@ -42,6 +42,25 @@
           <span>bloqueio automático em {{ sessionCountdownLabel }}</span>
         </div>
 
+        <button
+          class="secondary-btn"
+          :class="{ 'success-outline': driveStatus.configured }"
+          @click="openDriveSettings"
+        >
+          <Cloud :size="18" />
+          <span>{{ driveStatus.configured ? 'Drive configurado' : 'Configurar Drive' }}</span>
+        </button>
+
+        <button
+          v-if="driveStatus.configured"
+          class="secondary-btn"
+          @click="syncGoogleDriveNow"
+          :disabled="driveSyncing"
+        >
+          <RefreshCw :size="18" :class="{ spinning: driveSyncing }" />
+          <span>{{ driveSyncing ? 'Sincronizando...' : 'Sincronizar agora' }}</span>
+        </button>
+
         <button class="secondary-btn" @click="importBackup">
           <Upload :size="18" />
           <span>Importar backup</span>
@@ -74,17 +93,31 @@
           <ShieldCheck :size="36" />
         </div>
         <h2>Criar cofre</h2>
-        <p class="muted auth-copy">Defina sua chave mestra. Ela será usada para proteger todos os seus itens localmente.</p>
+        <p class="muted auth-copy">
+          Defina sua chave mestra. Ela será usada para proteger todos os seus itens localmente.
+        </p>
 
         <form class="form-grid" @submit.prevent="handleCreateVault">
           <label>
             <span>Chave mestra</span>
-            <input v-model="createForm.masterPassword" type="password" minlength="8" required placeholder="No mínimo 8 caracteres" />
+            <input
+              v-model="createForm.masterPassword"
+              type="password"
+              minlength="8"
+              required
+              placeholder="No mínimo 8 caracteres"
+            />
           </label>
 
           <label>
             <span>Confirmar chave</span>
-            <input v-model="createForm.confirmPassword" type="password" minlength="8" required placeholder="Digite novamente" />
+            <input
+              v-model="createForm.confirmPassword"
+              type="password"
+              minlength="8"
+              required
+              placeholder="Digite novamente"
+            />
           </label>
 
           <button class="primary-btn full-width">
@@ -100,7 +133,9 @@
             <LockKeyhole :size="42" />
           </div>
           <h2>Acesse seu cofre</h2>
-          <p>Seus dados permanecem criptografados localmente e só são liberados com sua chave mestra.</p>
+          <p>
+            Seus dados permanecem criptografados localmente e só são liberados com sua chave mestra.
+          </p>
         </div>
 
         <div class="panel auth-panel auth-panel-locked">
@@ -111,7 +146,13 @@
           <form class="form-grid" @submit.prevent="handleUnlock">
             <label>
               <span>Chave mestra</span>
-              <input v-model="unlockPassword" type="password" required placeholder="Sua chave mestra" autofocus />
+              <input
+                v-model="unlockPassword"
+                type="password"
+                required
+                placeholder="Sua chave mestra"
+                autofocus
+              />
             </label>
 
             <button class="primary-btn full-width">
@@ -122,7 +163,9 @@
 
           <div class="auth-footer-note">
             <ShieldCheck :size="16" />
-            <span>Seu cofre é bloqueado automaticamente por inatividade e ao minimizar a janela.</span>
+            <span>
+              Seu cofre é bloqueado automaticamente por inatividade e ao minimizar a janela.
+            </span>
           </div>
         </div>
       </section>
@@ -143,16 +186,44 @@
             </article>
           </div>
 
+          <div class="drive-mini panel-mini">
+            <div class="drive-mini-header">
+              <strong>Google Drive</strong>
+              <span :class="driveStatus.configured ? 'status-ok' : 'status-off'">
+                {{ driveStatus.configured ? 'Configurado' : 'Desativado' }}
+              </span>
+            </div>
+
+            <p class="muted small-copy">
+              {{
+                driveStatus.lastSyncAt
+                  ? `Última sync: ${formatDateTime(driveStatus.lastSyncAt)}`
+                  : 'Nenhuma sincronização ainda.'
+              }}
+            </p>
+
+            <button class="ghost-btn small full-width" @click="openDriveSettings">
+              <Settings2 :size="16" />
+              <span>Ajustes do Drive</span>
+            </button>
+          </div>
+
           <label>
             <span>Buscar</span>
-            <input v-model="search" type="text" placeholder="Título, email, site, nota..." />
+            <input
+              v-model="search"
+              type="text"
+              placeholder="Título, email, site, nota..."
+            />
           </label>
 
           <label>
             <span>Categoria</span>
             <select v-model="selectedCategory">
               <option value="">Todas</option>
-              <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
+              <option v-for="category in categories" :key="category" :value="category">
+                {{ category }}
+              </option>
             </select>
           </label>
 
@@ -174,7 +245,10 @@
           <div class="content-header">
             <div>
               <h2>Itens protegidos</h2>
-              <p class="muted">Sessão ativa libera ações sensíveis até o bloqueio automático após {{ AUTO_LOCK_MINUTES }} min.</p>
+              <p class="muted">
+                Sessão ativa libera ações sensíveis até o bloqueio automático após
+                {{ AUTO_LOCK_MINUTES }} min.
+              </p>
             </div>
           </div>
 
@@ -184,7 +258,11 @@
           </div>
 
           <div v-else class="credential-list">
-            <article v-for="item in filteredCredentials" :key="item.id" class="credential-card">
+            <article
+              v-for="item in filteredCredentials"
+              :key="item.id"
+              class="credential-card"
+            >
               <div class="credential-main">
                 <div>
                   <h3>{{ item.title }}</h3>
@@ -198,7 +276,12 @@
                       <span>{{ typeLabel(item.itemType) }}</span>
                     </span>
 
-                    <button v-if="item.website" type="button" class="credential-link link-button" @click="openWebsite(item.website)">
+                    <button
+                      v-if="item.website"
+                      type="button"
+                      class="credential-link link-button"
+                      @click="openWebsite(item.website)"
+                    >
                       <LinkIcon :size="14" />
                       <span>{{ item.website }}</span>
                     </button>
@@ -208,7 +291,12 @@
 
               <div class="secret-box">
                 <template v-if="item.itemType === 'password'">
-                  <input :type="visiblePasswords[item.id] ? 'text' : 'password'" :value="visiblePasswords[item.id] ? (revealedPasswords[item.id] || '') : passwordPlaceholder" readonly />
+                  <input
+                    :type="visiblePasswords[item.id] ? 'text' : 'password'"
+                    :value="visiblePasswords[item.id] ? (revealedPasswords[item.id] || '') : passwordPlaceholder"
+                    readonly
+                  />
+
                   <button class="ghost-btn small" @click="toggleVisibility(item.id)">
                     <component :is="visiblePasswords[item.id] ? EyeOff : Eye" :size="16" />
                     <span>{{ visiblePasswords[item.id] ? 'Ocultar' : 'Mostrar' }}</span>
@@ -228,12 +316,20 @@
               </div>
 
               <div class="card-actions">
-                <button v-if="item.username || item.email" class="secondary-btn small" @click="copyText(item.username || item.email)">
+                <button
+                  v-if="item.username || item.email"
+                  class="secondary-btn small"
+                  @click="copyText(item.username || item.email)"
+                >
                   <Copy :size="16" />
                   <span>Copiar login</span>
                 </button>
 
-                <button v-if="item.itemType === 'password'" class="secondary-btn small" @click="copyPassword(item.id)">
+                <button
+                  v-if="item.itemType === 'password'"
+                  class="secondary-btn small"
+                  @click="copyPassword(item.id)"
+                >
                   <KeyRound :size="16" />
                   <span>Copiar senha</span>
                 </button>
@@ -256,6 +352,129 @@
 
     <div v-if="toast" class="toast">{{ toast }}</div>
 
+    <div v-if="showDriveReminder" class="modal-overlay" @click.self="showDriveReminder = false">
+      <section class="modal modal-small">
+        <div class="modal-header">
+          <h3>Sincronize seu backup agora</h3>
+          <button class="ghost-btn small" @click="showDriveReminder = false">
+            <X :size="16" />
+            <span>Fechar</span>
+          </button>
+        </div>
+
+        <div class="drive-reminder-body">
+          <p class="muted">Já faz mais de 3 dias desde o último backup no Google Drive.</p>
+
+          <div class="drive-reminder-actions">
+            <button class="secondary-btn" @click="openDriveSettings">
+              <Settings2 :size="16" />
+              <span>Configurações</span>
+            </button>
+
+            <button class="primary-btn" @click="syncGoogleDriveNow">
+              <CloudUpload :size="16" />
+              <span>Sincronizar agora</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="showDriveModal" class="modal-overlay" @click.self="closeDriveSettings">
+      <section class="modal modal-large">
+        <div class="modal-header">
+          <h3>Google Drive</h3>
+          <button class="ghost-btn small" @click="closeDriveSettings">
+            <X :size="16" />
+            <span>Fechar</span>
+          </button>
+        </div>
+
+        <div class="drive-guide">
+          <h4>Como configurar</h4>
+          <ol>
+            <li>Crie uma pasta chamada <strong>Vaulty</strong> no seu Google Drive.</li>
+            <li>No Google Cloud, crie credenciais OAuth para app desktop e copie o <strong>Client ID</strong> e o <strong>Client Secret</strong>.</li>
+            <li>Gere um <strong>Refresh Token</strong> para a conta Google que vai guardar o backup.</li>
+            <li>Cole os dados abaixo e salve.</li>
+          </ol>
+          <p class="muted">
+            O Vaulty envia apenas o backup criptografado do cofre. Sem a chave mestra, o conteúdo continua protegido.
+          </p>
+        </div>
+
+        <form class="form-grid two-columns" @submit.prevent="saveDriveSettings">
+          <label class="full-span">
+            <span>Client ID</span>
+            <input
+              v-model="driveForm.clientId"
+              type="text"
+              placeholder="Seu client id OAuth"
+            />
+          </label>
+
+          <label class="full-span">
+            <span>Client Secret</span>
+            <input
+              v-model="driveForm.clientSecret"
+              type="password"
+              placeholder="Seu client secret OAuth"
+            />
+          </label>
+
+          <label class="full-span">
+            <span>Refresh Token</span>
+            <textarea
+              v-model="driveForm.refreshToken"
+              rows="4"
+              placeholder="Cole aqui o refresh token"
+            ></textarea>
+          </label>
+
+          <label>
+            <span>Nome da pasta no Drive</span>
+            <input
+              v-model="driveForm.folderName"
+              type="text"
+              placeholder="Vaulty"
+            />
+          </label>
+
+          <label class="toggle-row">
+            <span>Mostrar lembrete a cada 3 dias</span>
+            <input
+              v-model="driveForm.reminderEnabled"
+              type="checkbox"
+              class="toggle-checkbox"
+            />
+          </label>
+
+          <div class="full-span drive-status-box">
+            <strong>Status</strong>
+            <p class="muted">
+              {{
+                driveStatus.lastSyncAt
+                  ? `Última sincronização: ${formatDateTime(driveStatus.lastSyncAt)}`
+                  : 'Nenhum backup sincronizado ainda.'
+              }}
+            </p>
+          </div>
+
+          <div class="full-span drive-reminder-actions">
+            <button type="button" class="secondary-btn" @click="syncGoogleDriveNow">
+              <CloudUpload :size="16" />
+              <span>Sincronizar agora</span>
+            </button>
+
+            <button class="primary-btn" type="submit">
+              <Save :size="16" />
+              <span>Salvar configuração</span>
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+
     <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
       <section class="modal modal-large">
         <div class="modal-header">
@@ -270,12 +489,21 @@
         <form class="form-grid two-columns" @submit.prevent="saveCredential">
           <label>
             <span>Título</span>
-            <input v-model="form.title" type="text" required placeholder="Ex.: GitHub / Documento / Anotação" />
+            <input
+              v-model="form.title"
+              type="text"
+              required
+              placeholder="Ex.: GitHub / Documento / Anotação"
+            />
           </label>
 
           <label>
             <span>Categoria</span>
-            <input v-model="form.category" type="text" placeholder="Ex.: Trabalho" />
+            <input
+              v-model="form.category"
+              type="text"
+              placeholder="Ex.: Trabalho"
+            />
           </label>
 
           <label>
@@ -288,34 +516,62 @@
 
           <label class="toggle-row">
             <span>Possui website</span>
-            <input v-model="form.hasWebsite" type="checkbox" class="toggle-checkbox" />
+            <input
+              v-model="form.hasWebsite"
+              type="checkbox"
+              class="toggle-checkbox"
+            />
           </label>
 
           <label v-if="shouldShowWebsiteField()" class="full-span">
             <span>Website</span>
-            <input v-model="form.website" type="url" placeholder="https://site.com" />
+            <input
+              v-model="form.website"
+              type="url"
+              placeholder="https://site.com"
+            />
           </label>
 
           <label v-if="form.itemType === 'password'">
             <span>Usuário</span>
-            <input v-model="form.username" type="text" placeholder="Login" />
+            <input
+              v-model="form.username"
+              type="text"
+              placeholder="Login"
+            />
           </label>
 
           <label v-if="form.itemType === 'password'">
             <span>Email</span>
-            <input v-model="form.email" type="email" placeholder="email@exemplo.com" />
+            <input
+              v-model="form.email"
+              type="email"
+              placeholder="email@exemplo.com"
+            />
           </label>
 
           <label class="full-span">
             <span>Notas rápidas</span>
-            <textarea v-model="form.notes" rows="3" placeholder="Descrição curta para busca e organização"></textarea>
+            <textarea
+              v-model="form.notes"
+              rows="3"
+              placeholder="Descrição curta para busca e organização"
+            ></textarea>
           </label>
 
           <label v-if="form.itemType === 'password'" class="full-span">
             <span>Senha</span>
             <div class="inline-row">
-              <input v-model="form.password" type="text" placeholder="Senha" />
-              <button type="button" class="secondary-btn" @click="form.password = generatePassword()">
+              <input
+                v-model="form.password"
+                type="text"
+                placeholder="Senha"
+              />
+              <button
+                type="button"
+                class="secondary-btn"
+                @click="form.password = generatePassword()"
+              >
                 <Sparkles :size="16" />
                 <span>Gerar</span>
               </button>
@@ -324,7 +580,11 @@
 
           <label v-if="form.itemType === 'text'" class="full-span">
             <span>Texto seguro longo</span>
-            <textarea v-model="form.secretText" rows="12" placeholder="Guarde anotações longas, códigos, respostas de segurança, chaves, observações privadas..."></textarea>
+            <textarea
+              v-model="form.secretText"
+              rows="12"
+              placeholder="Guarde anotações longas, códigos, respostas de segurança, chaves, observações privadas..."
+            ></textarea>
           </label>
 
           <button class="primary-btn full-span">
@@ -340,6 +600,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
+  Cloud,
+  CloudUpload,
   Copy,
   Download,
   Eye,
@@ -353,7 +615,9 @@ import {
   Minus,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
+  Settings2,
   ShieldCheck,
   Sparkles,
   Square,
@@ -362,7 +626,7 @@ import {
   X
 } from 'lucide-vue-next'
 
-const AUTO_LOCK_MINUTES = 5
+const AUTO_LOCK_MINUTES = 3
 const AUTO_LOCK_MS = AUTO_LOCK_MINUTES * 60 * 1000
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 const passwordPlaceholder = '••••••••••••••••'
@@ -385,12 +649,31 @@ const sessionEndsAt = ref(null)
 const sessionSecondsLeft = ref(0)
 const clipboardClearTimer = ref(null)
 const isMaximized = ref(false)
+const showDriveModal = ref(false)
+const showDriveReminder = ref(false)
+const driveSyncing = ref(false)
+
+const driveStatus = reactive({
+  configured: false,
+  lastSyncAt: '',
+  reminderEnabled: true,
+  dueNow: false
+})
+
 let detachForcedLockListener = null
 let detachWindowStateListener = null
 
 const createForm = reactive({
   masterPassword: '',
   confirmPassword: ''
+})
+
+const driveForm = reactive({
+  clientId: '',
+  clientSecret: '',
+  refreshToken: '',
+  folderName: 'Vaulty',
+  reminderEnabled: true
 })
 
 const emptyForm = () => ({
@@ -430,7 +713,10 @@ watch(() => form.itemType, (type) => {
   }
 })
 
-const categories = computed(() => [...new Set(credentials.value.map((item) => item.category).filter(Boolean))].sort())
+const categories = computed(() => {
+  return [...new Set(credentials.value.map((item) => item.category).filter(Boolean))].sort()
+})
+
 const categoriesCount = computed(() => categories.value.length)
 
 const filteredCredentials = computed(() => {
@@ -438,7 +724,14 @@ const filteredCredentials = computed(() => {
 
   return credentials.value.filter((item) => {
     const matchesCategory = !selectedCategory.value || item.category === selectedCategory.value
-    const haystack = [item.title, item.username, item.email, item.website, item.category, item.notes]
+    const haystack = [
+      item.title,
+      item.username,
+      item.email,
+      item.website,
+      item.category,
+      item.notes
+    ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -462,6 +755,11 @@ function setToast(message) {
   }, 2600)
 }
 
+function formatDateTime(value) {
+  if (!value) return ''
+  return new Date(value).toLocaleString()
+}
+
 function clearClipboardTimer() {
   if (clipboardClearTimer.value) {
     window.clearTimeout(clipboardClearTimer.value)
@@ -471,6 +769,7 @@ function clearClipboardTimer() {
 
 async function scheduleClipboardClear() {
   clearClipboardTimer()
+
   clipboardClearTimer.value = window.setTimeout(async () => {
     try {
       const current = await navigator.clipboard.readText()
@@ -478,7 +777,9 @@ async function scheduleClipboardClear() {
         await navigator.clipboard.writeText('')
         setToast('Área de transferência limpa automaticamente.')
       }
-    } catch {}
+    } catch {
+      // silencioso
+    }
   }, CLIPBOARD_CLEAR_SECONDS * 1000)
 }
 
@@ -487,6 +788,7 @@ function clearIdleTimers() {
     window.clearTimeout(idleTimer)
     idleTimer = null
   }
+
   if (countdownTimer) {
     window.clearInterval(countdownTimer)
     countdownTimer = null
@@ -498,7 +800,11 @@ function updateCountdown() {
     sessionSecondsLeft.value = 0
     return
   }
-  sessionSecondsLeft.value = Math.max(0, Math.ceil((sessionEndsAt.value - Date.now()) / 1000))
+
+  sessionSecondsLeft.value = Math.max(
+    0,
+    Math.ceil((sessionEndsAt.value - Date.now()) / 1000)
+  )
 }
 
 async function handleAutoLock() {
@@ -522,8 +828,10 @@ function scheduleAutoLock() {
 
 function markActivity() {
   if (!unlocked.value) return
+
   const now = Date.now()
   if (now - lastActivityTs < 750) return
+
   lastActivityTs = now
   scheduleAutoLock()
 }
@@ -554,6 +862,7 @@ function unbindActivityListeners() {
 
 function handleVisibilityChange() {
   if (!unlocked.value) return
+
   if (document.visibilityState === 'visible') {
     markActivity()
   }
@@ -580,13 +889,95 @@ async function refreshStatus() {
 
 async function loadCredentials() {
   const result = await window.vaulty.listCredentials()
+
   if (Array.isArray(result)) {
     credentials.value = result
     return
   }
+
   if (result?.success === false) {
     setToast(result.error)
   }
+}
+
+async function refreshDriveStatus() {
+  const result = await window.vaulty.driveGetStatus()
+
+  if (result?.success === false) {
+    return
+  }
+
+  driveStatus.configured = Boolean(result.configured)
+  driveStatus.lastSyncAt = result.lastSyncAt || ''
+  driveStatus.reminderEnabled = result.reminderEnabled !== false
+  driveStatus.dueNow = Boolean(result.dueNow)
+
+  if (unlocked.value && driveStatus.configured && driveStatus.dueNow && driveStatus.reminderEnabled) {
+    showDriveReminder.value = true
+  }
+}
+
+async function openDriveSettings() {
+  const result = await window.vaulty.driveGetSettings()
+
+  if (result?.success === false) {
+    setToast(result.error)
+    return
+  }
+
+  driveForm.clientId = result.settings.clientId || ''
+  driveForm.clientSecret = result.settings.clientSecret || ''
+  driveForm.refreshToken = result.settings.refreshToken || ''
+  driveForm.folderName = result.settings.folderName || 'Vaulty'
+  driveForm.reminderEnabled = result.settings.reminderEnabled !== false
+  showDriveModal.value = true
+}
+
+function closeDriveSettings() {
+  showDriveModal.value = false
+}
+
+async function saveDriveSettings() {
+  const payload = {
+    clientId: driveForm.clientId.trim(),
+    clientSecret: driveForm.clientSecret.trim(),
+    refreshToken: driveForm.refreshToken.trim(),
+    folderName: (driveForm.folderName || 'Vaulty').trim() || 'Vaulty',
+    reminderEnabled: Boolean(driveForm.reminderEnabled)
+  }
+
+  if (!payload.clientId || !payload.clientSecret || !payload.refreshToken) {
+    setToast('Preencha Client ID, Client Secret e Refresh Token.')
+    return
+  }
+
+  const result = await window.vaulty.driveSaveSettings(payload)
+
+  if (result?.success === false) {
+    setToast(result.error || 'Erro ao salvar configuração do Drive.')
+    return
+  }
+
+  await refreshDriveStatus()
+  showDriveModal.value = false
+  setToast('Configuração do Google Drive salva.')
+}
+
+async function syncGoogleDriveNow() {
+  if (driveSyncing.value) return
+
+  driveSyncing.value = true
+  const result = await window.vaulty.driveSyncNow()
+  driveSyncing.value = false
+
+  if (result?.success === false) {
+    setToast(result.error || 'Falha ao sincronizar com o Google Drive.')
+    return
+  }
+
+  await refreshDriveStatus()
+  showDriveReminder.value = false
+  setToast('Backup sincronizado com o Google Drive.')
 }
 
 async function handleCreateVault() {
@@ -596,6 +987,7 @@ async function handleCreateVault() {
   }
 
   const result = await window.vaulty.createVault(createForm.masterPassword)
+
   if (result.success === false) {
     setToast(result.error)
     return
@@ -608,11 +1000,13 @@ async function handleCreateVault() {
   lockReason.value = ''
   startSessionTracking()
   await loadCredentials()
+  await refreshDriveStatus()
   setToast('Cofre criado com sucesso.')
 }
 
 async function handleUnlock() {
   const result = await window.vaulty.unlock(unlockPassword.value)
+
   if (result.success === false) {
     setToast(result.error)
     return
@@ -623,6 +1017,7 @@ async function handleUnlock() {
   lockReason.value = ''
   startSessionTracking()
   await loadCredentials()
+  await refreshDriveStatus()
   setToast('Cofre desbloqueado.')
 }
 
@@ -636,6 +1031,8 @@ async function lockVault(reason = '') {
   selectedCategory.value = ''
   generatedPassword.value = ''
   lockReason.value = reason
+  showDriveReminder.value = false
+  showDriveModal.value = false
 
   Object.keys(visiblePasswords).forEach((key) => delete visiblePasswords[key])
   Object.keys(revealedPasswords).forEach((key) => delete revealedPasswords[key])
@@ -666,7 +1063,9 @@ function openCreateModal() {
 
 async function openEditModal(item) {
   markActivity()
+
   const result = await window.vaulty.getCredentialForEdit(item.id)
+
   if (result?.success === false) {
     setToast(result.error)
     return
@@ -677,6 +1076,7 @@ async function openEditModal(item) {
     ...result.credential,
     hasWebsite: Boolean(result.credential.website)
   })
+
   showModal.value = true
 }
 
@@ -717,6 +1117,7 @@ async function saveCredential() {
   }
 
   const result = await window.vaulty.saveCredential(payload)
+
   if (result?.success === false) {
     setToast(result.error || 'Erro ao salvar item.')
     return
@@ -729,10 +1130,12 @@ async function saveCredential() {
 
 async function removeCredential(id) {
   markActivity()
+
   const confirmed = window.confirm('Excluir este item?')
   if (!confirmed) return
 
   const result = await window.vaulty.deleteCredential(id)
+
   if (result.success === false) {
     setToast(result.error)
     return
@@ -740,6 +1143,7 @@ async function removeCredential(id) {
 
   delete visiblePasswords[id]
   delete revealedPasswords[id]
+
   await loadCredentials()
   setToast('Item excluído.')
 }
@@ -748,6 +1152,7 @@ async function ensurePasswordLoaded(id) {
   if (revealedPasswords[id]) return revealedPasswords[id]
 
   const result = await window.vaulty.revealPassword(id)
+
   if (result?.success === false) {
     setToast(result.error)
     return ''
@@ -759,18 +1164,22 @@ async function ensurePasswordLoaded(id) {
 
 async function toggleVisibility(id) {
   markActivity()
+
   if (!visiblePasswords[id]) {
     const password = await ensurePasswordLoaded(id)
     if (!password) return
     visiblePasswords[id] = true
     return
   }
+
   visiblePasswords[id] = false
 }
 
 async function copyPassword(id) {
   markActivity()
+
   const password = await ensurePasswordLoaded(id)
+
   if (!password) {
     setToast('Nenhuma senha encontrada para este item.')
     return
@@ -783,6 +1192,7 @@ async function copyPassword(id) {
 
 async function copyText(value) {
   markActivity()
+
   if (!value) {
     setToast('Nada para copiar.')
     return
@@ -796,9 +1206,11 @@ async function copyText(value) {
 function generatePassword(size = 20) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*_-+='
   let out = ''
+
   crypto.getRandomValues(new Uint32Array(size)).forEach((n) => {
     out += chars[n % chars.length]
   })
+
   return out
 }
 
@@ -816,6 +1228,7 @@ async function exportBackup() {
 async function importBackup() {
   markActivity()
   const result = await window.vaulty.importBackup()
+
   if (result?.success) {
     await loadCredentials()
     setToast(`${result.imported} item(ns) importado(s).`)
@@ -828,6 +1241,7 @@ function shouldShowWebsiteField() {
 
 async function openWebsite(url) {
   if (!url) return
+
   const result = await window.vaulty.openExternal(url)
   if (result?.success === false) {
     setToast(result.error || 'Não foi possível abrir o link.')
@@ -877,13 +1291,20 @@ onMounted(async () => {
     unlocked.value = true
     startSessionTracking()
     await loadCredentials()
+    await refreshDriveStatus()
   }
 })
 
 onBeforeUnmount(() => {
   stopSessionTracking()
   clearClipboardTimer()
-  if (typeof detachForcedLockListener === 'function') detachForcedLockListener()
-  if (typeof detachWindowStateListener === 'function') detachWindowStateListener()
+
+  if (typeof detachForcedLockListener === 'function') {
+    detachForcedLockListener()
+  }
+
+  if (typeof detachWindowStateListener === 'function') {
+    detachWindowStateListener()
+  }
 })
 </script>

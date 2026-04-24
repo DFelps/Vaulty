@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('vaulty', {
 
   openExternal: (url) => ipcRenderer.invoke('vault:openExternal', url),
 
+  driveGetSettings: () => ipcRenderer.invoke('drive:getSettings'),
+  driveSaveSettings: (payload) => ipcRenderer.invoke('drive:saveSettings', payload),
+  driveGetStatus: () => ipcRenderer.invoke('drive:getStatus'),
+  driveSyncNow: () => ipcRenderer.invoke('drive:syncNow'),
+
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggleMaximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
