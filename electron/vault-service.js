@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const { dialog, app } = require('electron')
 const { initializeDatabase } = require('./database')
+const { uploadBackupToDrive, BACKUP_FILENAME } = require('./google-drive-service')
 
 const {
   encryptJson,
@@ -236,13 +237,9 @@ class VaultService {
     this.requireUnlocked()
 
     const row = this.getCredentialRow(id)
-
     const secure = this.readSecurePayload(row)
 
-    if (
-      this.normalizeItemType(secure.itemType) !==
-      'password'
-    ) {
+    if (this.normalizeItemType(secure.itemType) !== 'password') {
       return {
         success: true,
         password: ''
@@ -262,20 +259,12 @@ class VaultService {
       throw new Error('Informe um título.')
     }
 
-    const itemType = this.normalizeItemType(
-      input.itemType
-    )
+    const itemType = this.normalizeItemType(input.itemType)
 
     const payload = {
       itemType,
-      password:
-        itemType === 'password'
-          ? input.password || ''
-          : '',
-      secretText:
-        itemType === 'text'
-          ? input.secretText || ''
-          : ''
+      password: itemType === 'password' ? input.password || '' : '',
+      secretText: itemType === 'text' ? input.secretText || '' : ''
     }
 
     const encrypted = JSON.stringify(
@@ -284,15 +273,8 @@ class VaultService {
 
     const now = new Date().toISOString()
 
-    const username =
-      itemType === 'password'
-        ? input.username || ''
-        : ''
-
-    const email =
-      itemType === 'password'
-        ? input.email || ''
-        : ''
+    const username = itemType === 'password' ? input.username || '' : ''
+    const email = itemType === 'password' ? input.email || '' : ''
 
     if (input.id) {
       this.db.prepare(`
@@ -361,7 +343,7 @@ class VaultService {
     return { success: true }
   }
 
-  async exportBackup() {
+  buildBackupPayload() {
     this.requireUnlocked()
 
     const rows = this.db.prepare(`
@@ -373,12 +355,18 @@ class VaultService {
       this.toCredentialFull(row)
     )
 
+    return {
+      version: 3,
+      exportedAt: new Date().toISOString(),
+      entries
+    }
+  }
+
+  async exportBackup() {
+    this.requireUnlocked()
+
     const backup = encryptJson(
-      {
-        version: 3,
-        exportedAt: new Date().toISOString(),
-        entries
-      },
+      this.buildBackupPayload(),
       this.sessionKey
     )
 
@@ -443,6 +431,152 @@ class VaultService {
     return {
       success: true,
       imported
+    }
+  }
+
+  getAppSetting(key) {
+    const row = this.db
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get(key)
+
+    return row ? row.value : null
+  }
+
+  setAppSetting(key, value) {
+    this.db.prepare(`
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key)
+      DO UPDATE SET
+        value = excluded.value,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(key, value)
+  }
+
+  getDriveConfig() {
+    this.requireUnlocked()
+
+    const raw = this.getAppSetting('google_drive_config')
+    if (!raw) {
+      return null
+    }
+
+    try {
+      return decryptJson(JSON.parse(raw), this.sessionKey)
+    } catch {
+      throw new Error('Não foi possível ler a configuração do Google Drive.')
+    }
+  }
+
+  saveDriveSettings(input) {
+    this.requireUnlocked()
+
+    if (!input.clientId?.trim()) {
+      throw new Error('Informe o Client ID.')
+    }
+
+    if (!input.clientSecret?.trim()) {
+      throw new Error('Informe o Client Secret.')
+    }
+
+    if (!input.refreshToken?.trim()) {
+      throw new Error('Informe o Refresh Token.')
+    }
+
+    const config = {
+      clientId: input.clientId.trim(),
+      clientSecret: input.clientSecret.trim(),
+      refreshToken: input.refreshToken.trim(),
+      folderName: (input.folderName || 'Vaulty').trim() || 'Vaulty',
+      reminderEnabled: Boolean(input.reminderEnabled)
+    }
+
+    const encrypted = encryptJson(config, this.sessionKey)
+
+    this.setAppSetting('google_drive_config', JSON.stringify(encrypted))
+    this.setAppSetting('google_drive_reminder_enabled', config.reminderEnabled ? '1' : '0')
+
+    return { success: true }
+  }
+
+  getDriveSettings() {
+    this.requireUnlocked()
+
+    const config = this.getDriveConfig()
+
+    if (!config) {
+      return {
+        success: true,
+        settings: {
+          clientId: '',
+          clientSecret: '',
+          refreshToken: '',
+          folderName: 'Vaulty',
+          reminderEnabled: true
+        }
+      }
+    }
+
+    return {
+      success: true,
+      settings: {
+        clientId: config.clientId || '',
+        clientSecret: config.clientSecret || '',
+        refreshToken: config.refreshToken || '',
+        folderName: config.folderName || 'Vaulty',
+        reminderEnabled: config.reminderEnabled !== false
+      }
+    }
+  }
+
+  getDriveStatus() {
+    this.requireUnlocked()
+
+    const raw = this.getAppSetting('google_drive_config')
+    const lastSyncAt = this.getAppSetting('google_drive_last_sync_at') || ''
+    const reminderEnabled = this.getAppSetting('google_drive_reminder_enabled') !== '0'
+
+    let dueNow = false
+    if (raw && lastSyncAt) {
+      const last = new Date(lastSyncAt).getTime()
+      dueNow = Number.isFinite(last) && (Date.now() - last >= 3 * 24 * 60 * 60 * 1000)
+    } else if (raw) {
+      dueNow = true
+    }
+
+    return {
+      success: true,
+      configured: Boolean(raw),
+      lastSyncAt,
+      reminderEnabled,
+      dueNow
+    }
+  }
+
+  async syncDriveNow() {
+    this.requireUnlocked()
+
+    const config = this.getDriveConfig()
+    if (!config) {
+      throw new Error('Configure o Google Drive antes de sincronizar.')
+    }
+
+    const backupPayload = this.buildBackupPayload()
+    const encrypted = encryptJson(backupPayload, this.sessionKey)
+    const content = JSON.stringify(encrypted, null, 2)
+
+    const result = await uploadBackupToDrive(config, content)
+
+    const now = new Date().toISOString()
+    this.setAppSetting('google_drive_last_sync_at', now)
+    this.setAppSetting('google_drive_last_file_name', result.fileName || BACKUP_FILENAME)
+    this.setAppSetting('google_drive_last_file_id', result.fileId || '')
+    this.setAppSetting('google_drive_last_folder_id', result.folderId || '')
+
+    return {
+      success: true,
+      syncedAt: now,
+      fileName: result.fileName || BACKUP_FILENAME
     }
   }
 }

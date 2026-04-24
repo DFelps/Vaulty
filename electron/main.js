@@ -7,6 +7,23 @@ const isDev = !app.isPackaged
 let mainWindow = null
 const vault = new VaultService()
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!gotSingleInstanceLock) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+
+  mainWindow.show()
+  mainWindow.focus()
+})
+
 function emitForcedLock(reason) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('vault:forced-lock', { reason })
@@ -22,13 +39,19 @@ function emitWindowState() {
 }
 
 function getWindowIcon() {
-  return path.join(__dirname, '..', 'assets', 'icon.png')
+  return path.join(__dirname, '..', 'build', 'icon.ico')
 }
 
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
+
   mainWindow = new BrowserWindow({
     width: 1220,
-    height: 820,
+    height: 895,
     minWidth: 1000,
     minHeight: 700,
     title: 'Vaulty',
@@ -56,6 +79,10 @@ function createWindow() {
   mainWindow.on('maximize', emitWindowState)
   mainWindow.on('unmaximize', emitWindowState)
 
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
@@ -68,9 +95,7 @@ app.whenReady().then(() => {
   createWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
+    createWindow()
   })
 })
 
@@ -104,6 +129,11 @@ ipcMain.handle('vault:saveCredential', handler((_, payload) => vault.saveCredent
 ipcMain.handle('vault:deleteCredential', handler((_, id) => vault.deleteCredential(id)))
 ipcMain.handle('vault:exportBackup', handler(() => vault.exportBackup()))
 ipcMain.handle('vault:importBackup', handler(() => vault.importBackup()))
+
+ipcMain.handle('drive:getSettings', handler(() => vault.getDriveSettings()))
+ipcMain.handle('drive:saveSettings', handler((_, payload) => vault.saveDriveSettings(payload)))
+ipcMain.handle('drive:getStatus', handler(() => vault.getDriveStatus()))
+ipcMain.handle('drive:syncNow', handler(() => vault.syncDriveNow()))
 
 ipcMain.handle('vault:openExternal', handler(async (_, url) => {
   if (!url || typeof url !== 'string') {
