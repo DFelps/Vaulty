@@ -1,5 +1,6 @@
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 const { dialog, app } = require('electron')
 const { initializeDatabase } = require('./database')
 const { uploadBackupToDrive, BACKUP_FILENAME } = require('./google-drive-service')
@@ -7,10 +8,13 @@ const { uploadBackupToDrive, BACKUP_FILENAME } = require('./google-drive-service
 const {
   encryptJson,
   decryptJson,
-  reEncryptJson,
   createVaultMetadata,
   verifyMasterPassword,
-  makeSessionKey
+  makeSessionKey,
+  generateRecoveryKey: createRecoveryKey,
+  hashRecoveryKey,
+  verifyRecoveryKey,
+  normalizeRecoveryKey
 } = require('./crypto')
 
 class VaultService {
@@ -73,7 +77,12 @@ class VaultService {
 
     this.sessionKey = makeSessionKey(masterPassword, meta.salt)
 
-    return { success: true }
+    const recoveryKey = this.createOrReplaceRecoveryKey()
+
+    return {
+      success: true,
+      recoveryKey
+    }
   }
 
   registerUnlockFailure() {
@@ -165,11 +174,11 @@ class VaultService {
     return row
   }
 
-  readSecurePayload(row) {
+  readSecurePayload(row, key = this.sessionKey) {
     try {
       return decryptJson(
         JSON.parse(row.encrypted_payload),
-        this.sessionKey
+        key
       )
     } catch {
       return {}
@@ -453,6 +462,13 @@ class VaultService {
     `).run(key, value)
   }
 
+  deleteAppSetting(key) {
+    this.db.prepare(`
+      DELETE FROM app_settings
+      WHERE key = ?
+    `).run(key)
+  }
+
   getDriveConfig() {
     this.requireUnlocked()
 
@@ -577,6 +593,168 @@ class VaultService {
       success: true,
       syncedAt: now,
       fileName: result.fileName || BACKUP_FILENAME
+    }
+  }
+
+  makeRecoveryCryptoKey(recoveryKey, saltHex) {
+    const recoveryHash = hashRecoveryKey(recoveryKey, saltHex)
+    return Buffer.from(recoveryHash.slice(0, 64), 'hex')
+  }
+
+  getRecoveryStatus() {
+    const hasRecoveryKey = Boolean(
+      this.getAppSetting('recovery_key_hash') &&
+      this.getAppSetting('recovery_key_salt') &&
+      this.getAppSetting('recovery_key_wrap')
+    )
+
+    return {
+      success: true,
+      hasRecoveryKey
+    }
+  }
+
+  createOrReplaceRecoveryKey() {
+    this.requireUnlocked()
+
+    const recoveryKey = createRecoveryKey()
+    const recoverySalt = crypto.randomBytes(16).toString('hex')
+    const recoveryHash = hashRecoveryKey(recoveryKey, recoverySalt)
+    const recoveryCryptoKey = this.makeRecoveryCryptoKey(recoveryKey, recoverySalt)
+
+    const wrapPayload = {
+      sessionKeyHex: this.sessionKey.toString('hex'),
+      createdAt: new Date().toISOString()
+    }
+
+    const encryptedWrap = encryptJson(wrapPayload, recoveryCryptoKey)
+
+    this.setAppSetting('recovery_key_salt', recoverySalt)
+    this.setAppSetting('recovery_key_hash', recoveryHash)
+    this.setAppSetting('recovery_key_wrap', JSON.stringify(encryptedWrap))
+    this.setAppSetting('recovery_key_created_at', new Date().toISOString())
+
+    return recoveryKey
+  }
+
+  generateRecoveryKey() {
+    this.requireUnlocked()
+
+    const recoveryKey = this.createOrReplaceRecoveryKey()
+
+    return {
+      success: true,
+      recoveryKey
+    }
+  }
+
+  recoverWithRecoveryKey(input) {
+    const recoveryKey = normalizeRecoveryKey(input?.recoveryKey)
+    const newMasterPassword = input?.newMasterPassword || ''
+
+    if (!recoveryKey) {
+      throw new Error('Informe a chave de recuperação.')
+    }
+
+    if (!newMasterPassword || newMasterPassword.length < 8) {
+      throw new Error('A nova chave mestra precisa ter pelo menos 8 caracteres.')
+    }
+
+    const recoverySalt = this.getAppSetting('recovery_key_salt')
+    const recoveryHash = this.getAppSetting('recovery_key_hash')
+    const recoveryWrapRaw = this.getAppSetting('recovery_key_wrap')
+
+    if (!recoverySalt || !recoveryHash || !recoveryWrapRaw) {
+      throw new Error('Este cofre ainda não possui chave de recuperação.')
+    }
+
+    const validRecovery = verifyRecoveryKey(
+      recoveryKey,
+      recoverySalt,
+      recoveryHash
+    )
+
+    if (!validRecovery) {
+      throw new Error('Chave de recuperação inválida.')
+    }
+
+    const recoveryCryptoKey = this.makeRecoveryCryptoKey(recoveryKey, recoverySalt)
+
+    let oldSessionKey
+
+    try {
+      const wrapPayload = decryptJson(
+        JSON.parse(recoveryWrapRaw),
+        recoveryCryptoKey
+      )
+
+      oldSessionKey = Buffer.from(wrapPayload.sessionKeyHex, 'hex')
+    } catch {
+      throw new Error('Não foi possível abrir a chave de recuperação.')
+    }
+
+    const newMeta = createVaultMetadata(newMasterPassword)
+    const newSessionKey = makeSessionKey(newMasterPassword, newMeta.salt)
+
+    const transaction = this.db.transaction(() => {
+      const rows = this.db.prepare(`
+        SELECT id, encrypted_payload
+        FROM credentials
+      `).all()
+
+      const updateCredential = this.db.prepare(`
+        UPDATE credentials
+        SET encrypted_payload = ?, updated_at = ?
+        WHERE id = ?
+      `)
+
+      const now = new Date().toISOString()
+
+      for (const row of rows) {
+        const payload = decryptJson(
+          JSON.parse(row.encrypted_payload),
+          oldSessionKey
+        )
+
+        const encrypted = JSON.stringify(
+          encryptJson(payload, newSessionKey)
+        )
+
+        updateCredential.run(encrypted, now, row.id)
+      }
+
+      const driveRaw = this.getAppSetting('google_drive_config')
+      if (driveRaw) {
+        const driveConfig = decryptJson(
+          JSON.parse(driveRaw),
+          oldSessionKey
+        )
+
+        this.setAppSetting(
+          'google_drive_config',
+          JSON.stringify(encryptJson(driveConfig, newSessionKey))
+        )
+      }
+
+      this.db.prepare(`
+        UPDATE vault_meta
+        SET salt = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+      `).run(
+        newMeta.salt,
+        newMeta.passwordHash
+      )
+    })
+
+    transaction()
+
+    this.sessionKey = newSessionKey
+
+    const newRecoveryKey = this.createOrReplaceRecoveryKey()
+
+    return {
+      success: true,
+      recoveryKey: newRecoveryKey
     }
   }
 }

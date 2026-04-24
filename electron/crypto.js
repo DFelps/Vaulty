@@ -5,6 +5,7 @@ const crypto = require('crypto')
 const KEY_LENGTH = 32
 const SALT_LENGTH = 16
 const IV_LENGTH = 12
+const RECOVERY_KEY_BYTES = 32
 
 function deriveKey(masterPassword, saltBuffer) {
   return crypto.scryptSync(
@@ -113,11 +114,51 @@ function makeSessionKey(
   )
 }
 
+function generateRecoveryKey() {
+  const raw = crypto.randomBytes(RECOVERY_KEY_BYTES).toString('hex').toUpperCase()
+
+  return raw
+    .match(/.{1,4}/g)
+    .join('-')
+}
+
+function normalizeRecoveryKey(recoveryKey) {
+  return String(recoveryKey || '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase()
+}
+
+function hashRecoveryKey(recoveryKey, saltHex) {
+  const normalized = normalizeRecoveryKey(recoveryKey)
+  const salt = Buffer.from(saltHex, 'hex')
+
+  return crypto
+    .scryptSync(normalized, salt, 64)
+    .toString('hex')
+}
+
+function verifyRecoveryKey(
+  recoveryKey,
+  saltHex,
+  expectedHash
+) {
+  const computed = hashRecoveryKey(recoveryKey, saltHex)
+
+  return crypto.timingSafeEqual(
+    Buffer.from(computed, 'hex'),
+    Buffer.from(expectedHash, 'hex')
+  )
+}
+
 module.exports = {
   encryptJson,
   decryptJson,
   reEncryptJson,
   createVaultMetadata,
   verifyMasterPassword,
-  makeSessionKey
+  makeSessionKey,
+  generateRecoveryKey,
+  hashRecoveryKey,
+  verifyRecoveryKey,
+  normalizeRecoveryKey
 }
