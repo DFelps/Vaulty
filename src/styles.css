@@ -1060,3 +1060,29 @@ label span,
 ::-webkit-scrollbar-corner {
   background: #0b1020;
 }
+
+.pagination-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 1.2rem;
+  flex-wrap: wrap;
+  color: #94a3b8;
+  font-size: 0.92rem;
+}
+
+.pagination-bar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.sort-control {
+  min-width: 210px;
+  max-width: 260px;
+}
+
+.sort-control span {
+  font-size: 0.82rem;
+}
