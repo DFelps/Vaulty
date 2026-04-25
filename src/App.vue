@@ -15,7 +15,7 @@
         </button>
         <button class="window-control-btn" @click="toggleMaximizeWindow" aria-label="Maximizar">
           <Square v-if="!isMaximized" :size="15" />
-          <Copy v-else :size="15" />
+          <CopyCheck v-else />
         </button>
         <button class="window-control-btn danger" @click="closeWindow" aria-label="Fechar">
           <X :size="16" />
@@ -318,6 +318,15 @@
                 Textos
               </button>
             </div>
+            <label class="sort-control">
+              <span>Ordenar</span>
+              <select v-model="sortMode">
+                <option value="favorite_recent">Favoritos + recentes</option>
+                <option value="recent">Mais recentes</option>
+                <option value="az">A-Z</option>
+                <option value="za">Z-A</option>
+              </select>
+            </label>
           </div>
 
           <div v-if="filteredCredentials.length === 0" class="empty-state">
@@ -327,7 +336,7 @@
 
           <div v-else class="credential-list">
             <article
-              v-for="item in filteredCredentials"
+              v-for="item in paginatedCredentials"
               :key="item.id"
               class="credential-card"
             >
@@ -423,6 +432,26 @@
                 </button>
               </div>
             </article>
+          </div>
+
+          <div v-if="filteredCredentials.length > ITEMS_PER_PAGE" class="pagination-bar">
+            <button
+              class="ghost-btn small"
+              :disabled="currentPage === 1"
+              @click="currentPage--"
+            >
+              Anterior
+            </button>
+
+            <span>{{ paginationLabel }} · Página {{ currentPage }} de {{ totalPages }}</span>
+
+            <button
+              class="ghost-btn small"
+              :disabled="currentPage === totalPages"
+              @click="currentPage++"
+            >
+              Próxima
+            </button>
           </div>
         </section>
       </template>
@@ -816,6 +845,7 @@ import {
   Cloud,
   CloudUpload,
   Copy,
+  CopyCheck,
   Download,
   Eye,
   EyeOff,
@@ -847,6 +877,8 @@ const AUTO_LOCK_MS = AUTO_LOCK_MINUTES * 60 * 1000
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 const passwordPlaceholder = '••••••••••••••••'
 const CLIPBOARD_CLEAR_SECONDS = 20
+const ITEMS_PER_PAGE = 6
+const currentPage = ref(1)
 
 const statusLoaded = ref(false)
 const status = ref({ hasVault: false, unlocked: false })
@@ -875,6 +907,7 @@ const driveSyncing = ref(false)
 const showRecoveryModal = ref(false)
 const showRecoveryKeyModal = ref(false)
 const generatedRecoveryKey = ref('')
+const sortMode = ref('favorite_recent')
 
 
 const driveStatus = reactive({
@@ -948,6 +981,10 @@ watch(() => form.itemType, (type) => {
   }
 })
 
+watch([search, selectedCategory, selectedFilter, sortMode], () => {
+  currentPage.value = 1
+})
+
 const categories = computed(() => {
   return categoriesList.value.map((category) => category.name)
 })
@@ -957,7 +994,7 @@ const categoriesCount = computed(() => categories.value.length)
 const filteredCredentials = computed(() => {
   const term = search.value.trim().toLowerCase()
 
-  return credentials.value.filter((item) => {
+  const filtered = credentials.value.filter((item) => {
     const matchesCategory = !selectedCategory.value || item.category === selectedCategory.value
 
     const matchesFilter =
@@ -980,7 +1017,54 @@ const filteredCredentials = computed(() => {
 
     return matchesCategory && matchesFilter && (!term || haystack.includes(term))
   })
+
+  return [...filtered].sort((a, b) => {
+    if (sortMode.value === 'az') {
+      return String(a.title || '').localeCompare(String(b.title || ''), 'pt-BR')
+    }
+
+    if (sortMode.value === 'za') {
+      return String(b.title || '').localeCompare(String(a.title || ''), 'pt-BR')
+    }
+
+    if (sortMode.value === 'recent') {
+      return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
+    }
+
+    const favoriteDiff = Number(b.favorite) - Number(a.favorite)
+    if (favoriteDiff !== 0) return favoriteDiff
+
+    return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
+  })
 })
+
+const totalPages = computed(() => {
+  return Math.max(1, Math.ceil(filteredCredentials.value.length / ITEMS_PER_PAGE))
+})
+
+const paginatedCredentials = computed(() => {
+  const start = (currentPage.value - 1) * ITEMS_PER_PAGE
+  return filteredCredentials.value.slice(start, start + ITEMS_PER_PAGE)
+})
+
+const paginationLabel = computed(() => {
+  if (filteredCredentials.value.length === 0) return '0 itens'
+
+  const start = (currentPage.value - 1) * ITEMS_PER_PAGE + 1
+  const end = Math.min(currentPage.value * ITEMS_PER_PAGE, filteredCredentials.value.length)
+
+  return `${start}-${end} de ${filteredCredentials.value.length}`
+})
+
+function clampCurrentPage() {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = totalPages.value
+  }
+
+  if (currentPage.value < 1) {
+    currentPage.value = 1
+  }
+}
 
 const sessionCountdownLabel = computed(() => {
   const total = Math.max(0, sessionSecondsLeft.value)
@@ -1481,6 +1565,9 @@ async function saveCredential() {
 
   closeModal()
   await loadCredentials()
+
+  clampCurrentPage()
+
   setToast('Item salvo com sucesso.')
 }
 
@@ -1501,6 +1588,9 @@ async function removeCredential(id) {
   delete revealedPasswords[id]
 
   await loadCredentials()
+
+  clampCurrentPage()
+
   setToast('Item excluído.')
 }
 
@@ -1587,6 +1677,8 @@ async function importBackup() {
 
   if (result?.success) {
     await loadCredentials()
+    await loadCategories()
+    clampCurrentPage()
     setToast(`${result.imported} item(ns) importado(s).`)
   }
 }
@@ -1661,7 +1753,10 @@ async function createCategory() {
 }
 
 async function deleteCategory(id) {
-  const confirmed = window.confirm('Excluir esta categoria? Os itens dela ficarão sem categoria.')
+  const confirmed = window.confirm(
+    'Excluir esta categoria? Os itens dela ficarão sem categoria.'
+  )
+
   if (!confirmed) return
 
   const result = await window.vaulty.deleteCategory(id)
@@ -1671,17 +1766,27 @@ async function deleteCategory(id) {
     return
   }
 
+  await loadCategories()
+
   if (selectedCategory.value) {
-    const stillExists = categoriesList.value.some((category) => category.name === selectedCategory.value)
-    if (!stillExists) selectedCategory.value = ''
+    const stillExists = categoriesList.value.some(
+      category => category.name === selectedCategory.value
+    )
+
+    if (!stillExists) {
+      selectedCategory.value = ''
+    }
   }
 
-  await loadCategories()
   await loadCredentials()
+  clampCurrentPage()
+
   setToast('Categoria excluída.')
 }
 
 async function toggleFavorite(id) {
+  markActivity()
+
   const result = await window.vaulty.toggleFavorite(id)
 
   if (result?.success === false) {
@@ -1690,6 +1795,7 @@ async function toggleFavorite(id) {
   }
 
   await loadCredentials()
+  clampCurrentPage()
 }
 
 onMounted(async () => {
@@ -1724,6 +1830,7 @@ onMounted(async () => {
     await loadCategories()
     await refreshDriveStatus()
     await refreshRecoveryStatus()
+    clampCurrentPage()
   }
 })
 
