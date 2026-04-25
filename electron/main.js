@@ -156,6 +156,7 @@ function createWindow(options = {}) {
     title: 'Vaulty',
     backgroundColor: '#0b1020',
     frame: false,
+    roundedCorners: true,
     titleBarStyle: 'hidden',
     icon: getWindowIcon(),
     show: !startHidden,
@@ -192,6 +193,10 @@ function createWindow(options = {}) {
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
+
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    })
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
   }
@@ -244,6 +249,13 @@ ipcMain.handle('vault:getCredentialForEdit', handler((_, id) => vault.getCredent
 ipcMain.handle('vault:revealPassword', handler((_, id) => vault.revealPassword(id)))
 ipcMain.handle('vault:saveCredential', handler((_, payload) => vault.saveCredential(payload)))
 ipcMain.handle('vault:deleteCredential', handler((_, id) => vault.deleteCredential(id)))
+
+ipcMain.handle('vault:toggleFavorite', handler((_, id) => vault.toggleFavorite(id)))
+
+ipcMain.handle('categories:list', handler(() => vault.listCategories()))
+ipcMain.handle('categories:create', handler((_, name) => vault.createCategory(name)))
+ipcMain.handle('categories:delete', handler((_, id) => vault.deleteCategory(id)))
+
 ipcMain.handle('vault:exportBackup', handler(() => vault.exportBackup()))
 ipcMain.handle('vault:importBackup', handler(() => vault.importBackup()))
 
