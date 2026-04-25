@@ -246,12 +246,19 @@
 
           <label>
             <span>Categoria</span>
-            <select v-model="selectedCategory">
-              <option value="">Todas</option>
-              <option v-for="category in categories" :key="category" :value="category">
-                {{ category }}
-              </option>
-            </select>
+            <div class="category-actions-row">
+              <select v-model="selectedCategory">
+                <option value="">Todas</option>
+                <option v-for="category in categories" :key="category" :value="category">
+                  {{ category }}
+                </option>
+              </select>
+
+              <button type="button" class="ghost-btn small" @click="openCategoryModal">
+                <Tags :size="16" />
+                <span>Gerenciar</span>
+              </button>
+            </div>
           </label>
 
           <button class="secondary-btn full-width" @click="generateStrongPassword">
@@ -277,6 +284,40 @@
                 {{ AUTO_LOCK_MINUTES }} min.
               </p>
             </div>
+
+            <div class="filter-tabs">
+              <button
+                class="filter-tab"
+                :class="{ active: selectedFilter === 'all' }"
+                @click="selectedFilter = 'all'"
+              >
+                Todos
+              </button>
+
+              <button
+                class="filter-tab"
+                :class="{ active: selectedFilter === 'favorites' }"
+                @click="selectedFilter = 'favorites'"
+              >
+                Favoritos
+              </button>
+
+              <button
+                class="filter-tab"
+                :class="{ active: selectedFilter === 'password' }"
+                @click="selectedFilter = 'password'"
+              >
+                Senhas
+              </button>
+
+              <button
+                class="filter-tab"
+                :class="{ active: selectedFilter === 'text' }"
+                @click="selectedFilter = 'text'"
+              >
+                Textos
+              </button>
+            </div>
           </div>
 
           <div v-if="filteredCredentials.length === 0" class="empty-state">
@@ -290,6 +331,16 @@
               :key="item.id"
               class="credential-card"
             >
+              <button
+                class="ghost-btn favorite-btn"
+                :class="{ active: item.favorite }"
+                @click="toggleFavorite(item.id)"
+                :title="item.favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'"
+              >
+                <Star v-if="item.favorite" :size="17" />
+                <StarOff v-else :size="17" />
+              </button>
+
               <div class="credential-main">
                 <div>
                   <h3>{{ item.title }}</h3>
@@ -591,6 +642,51 @@
       </section>
     </div>
 
+    
+    <div v-if="showCategoryModal" class="modal-overlay" @click.self="closeCategoryModal">
+      <section class="modal modal-small">
+        <div class="modal-header">
+          <h3>Gerenciar categorias</h3>
+          <button class="ghost-btn small" @click="closeCategoryModal">
+            <X :size="16" />
+            <span>Fechar</span>
+          </button>
+        </div>
+
+        <form class="form-grid" @submit.prevent="createCategory">
+          <label>
+            <span>Nova categoria</span>
+            <input
+              v-model="newCategoryName"
+              type="text"
+              placeholder="Ex.: Trabalho, Pessoal, Banco..."
+            />
+          </label>
+
+          <button class="primary-btn full-width">
+            <Plus :size="16" />
+            <span>Criar categoria</span>
+          </button>
+        </form>
+
+        <div class="category-list">
+          <div
+            v-for="category in categoriesList"
+            :key="category.id"
+            class="category-item"
+          >
+            <strong>{{ category.name }}</strong>
+
+            <button class="danger-btn small" @click="deleteCategory(category.id)">
+              <Trash2 :size="16" />
+              <span>Excluir</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+
     <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
       <section class="modal modal-large">
         <div class="modal-header">
@@ -615,11 +711,12 @@
 
           <label>
             <span>Categoria</span>
-            <input
-              v-model="form.category"
-              type="text"
-              placeholder="Ex.: Trabalho"
-            />
+            <select v-model="form.category">
+              <option value="">Sem categoria</option>
+              <option v-for="category in categories" :key="category" :value="category">
+                {{ category }}
+              </option>
+            </select>
           </label>
 
           <label>
@@ -737,6 +834,9 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  Star,
+  StarOff,
+  Tags,
   Trash2,
   Upload,
   X
@@ -761,6 +861,10 @@ const toast = ref('')
 const lockReason = ref('')
 const visiblePasswords = reactive({})
 const revealedPasswords = reactive({})
+const selectedFilter = ref('all')
+const showCategoryModal = ref(false)
+const categoriesList = ref([])
+const newCategoryName = ref('')
 const sessionEndsAt = ref(null)
 const sessionSecondsLeft = ref(0)
 const clipboardClearTimer = ref(null)
@@ -817,7 +921,8 @@ const emptyForm = () => ({
   category: '',
   notes: '',
   secretText: '',
-  itemType: 'password'
+  itemType: 'password',
+  favorite: false
 })
 
 const form = reactive(emptyForm())
@@ -844,7 +949,7 @@ watch(() => form.itemType, (type) => {
 })
 
 const categories = computed(() => {
-  return [...new Set(credentials.value.map((item) => item.category).filter(Boolean))].sort()
+  return categoriesList.value.map((category) => category.name)
 })
 
 const categoriesCount = computed(() => categories.value.length)
@@ -854,6 +959,13 @@ const filteredCredentials = computed(() => {
 
   return credentials.value.filter((item) => {
     const matchesCategory = !selectedCategory.value || item.category === selectedCategory.value
+
+    const matchesFilter =
+      selectedFilter.value === 'all' ||
+      (selectedFilter.value === 'favorites' && item.favorite) ||
+      (selectedFilter.value === 'password' && item.itemType === 'password') ||
+      (selectedFilter.value === 'text' && item.itemType === 'text')
+
     const haystack = [
       item.title,
       item.username,
@@ -866,7 +978,7 @@ const filteredCredentials = computed(() => {
       .join(' ')
       .toLowerCase()
 
-    return matchesCategory && (!term || haystack.includes(term))
+    return matchesCategory && matchesFilter && (!term || haystack.includes(term))
   })
 })
 
@@ -1141,6 +1253,7 @@ async function recoverWithRecoveryKey() {
   lockReason.value = ''
   startSessionTracking()
   await loadCredentials()
+  await loadCategories()
   await refreshDriveStatus()
   await refreshRecoveryStatus()
   setToast('Chave mestra redefinida com sucesso.')
@@ -1229,6 +1342,7 @@ async function handleCreateVault() {
   lockReason.value = ''
   startSessionTracking()
   await loadCredentials()
+  await loadCategories()
   await refreshDriveStatus()
   await refreshRecoveryStatus()
 
@@ -1253,6 +1367,7 @@ async function handleUnlock() {
   lockReason.value = ''
   startSessionTracking()
   await loadCredentials()
+  await loadCategories()
   await refreshDriveStatus()
   await refreshRecoveryStatus()
   setToast('Cofre desbloqueado.')
@@ -1335,6 +1450,7 @@ async function saveCredential() {
     website: shouldShowWebsiteField() ? (form.website || '') : '',
     notes: form.notes || '',
     itemType: form.itemType || 'password',
+    favorite: Boolean(form.favorite),
     username: '',
     email: '',
     password: '',
@@ -1503,6 +1619,79 @@ async function closeWindow() {
   await window.vaulty.closeWindow()
 }
 
+async function loadCategories() {
+  const result = await window.vaulty.listCategories()
+
+  if (result?.success === false) {
+    setToast(result.error || 'Não foi possível carregar categorias.')
+    return
+  }
+
+  categoriesList.value = Array.isArray(result.categories) ? result.categories : []
+}
+
+function openCategoryModal() {
+  newCategoryName.value = ''
+  showCategoryModal.value = true
+}
+
+function closeCategoryModal() {
+  showCategoryModal.value = false
+  newCategoryName.value = ''
+}
+
+async function createCategory() {
+  const name = newCategoryName.value.trim()
+
+  if (!name) {
+    setToast('Informe o nome da categoria.')
+    return
+  }
+
+  const result = await window.vaulty.createCategory(name)
+
+  if (result?.success === false) {
+    setToast(result.error || 'Não foi possível criar categoria.')
+    return
+  }
+
+  newCategoryName.value = ''
+  await loadCategories()
+  setToast('Categoria criada.')
+}
+
+async function deleteCategory(id) {
+  const confirmed = window.confirm('Excluir esta categoria? Os itens dela ficarão sem categoria.')
+  if (!confirmed) return
+
+  const result = await window.vaulty.deleteCategory(id)
+
+  if (result?.success === false) {
+    setToast(result.error || 'Não foi possível excluir categoria.')
+    return
+  }
+
+  if (selectedCategory.value) {
+    const stillExists = categoriesList.value.some((category) => category.name === selectedCategory.value)
+    if (!stillExists) selectedCategory.value = ''
+  }
+
+  await loadCategories()
+  await loadCredentials()
+  setToast('Categoria excluída.')
+}
+
+async function toggleFavorite(id) {
+  const result = await window.vaulty.toggleFavorite(id)
+
+  if (result?.success === false) {
+    setToast(result.error || 'Não foi possível favoritar item.')
+    return
+  }
+
+  await loadCredentials()
+}
+
 onMounted(async () => {
   await refreshStatus()
   await refreshRecoveryStatus()
@@ -1532,6 +1721,7 @@ onMounted(async () => {
     unlocked.value = true
     startSessionTracking()
     await loadCredentials()
+    await loadCategories()
     await refreshDriveStatus()
     await refreshRecoveryStatus()
   }

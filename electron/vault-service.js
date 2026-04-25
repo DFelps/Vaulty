@@ -160,6 +160,10 @@ class VaultService {
       : 'password'
   }
 
+  normalizeCategoryName(name) {
+    return String(name || '').trim()
+  }
+
   getCredentialRow(id) {
     const row = this.db.prepare(`
       SELECT *
@@ -200,6 +204,7 @@ class VaultService {
       website: row.website || '',
       category: row.category || '',
       notes: row.notes || '',
+      favorite: Boolean(row.favorite),
       itemType,
       hasSecretText: Boolean(secure.secretText),
       createdAt: row.created_at,
@@ -223,7 +228,7 @@ class VaultService {
     const rows = this.db.prepare(`
       SELECT *
       FROM credentials
-      ORDER BY updated_at DESC, id DESC
+      ORDER BY favorite DESC, updated_at DESC, id DESC
     `).all()
 
     return rows.map((row) =>
@@ -261,6 +266,17 @@ class VaultService {
     }
   }
 
+  ensureCategoryExists(name) {
+    const categoryName = this.normalizeCategoryName(name)
+
+    if (!categoryName) return
+
+    this.db.prepare(`
+      INSERT OR IGNORE INTO categories (name)
+      VALUES (?)
+    `).run(categoryName)
+  }
+
   saveCredential(input) {
     this.requireUnlocked()
 
@@ -269,6 +285,11 @@ class VaultService {
     }
 
     const itemType = this.normalizeItemType(input.itemType)
+    const category = this.normalizeCategoryName(input.category)
+
+    if (category) {
+      this.ensureCategoryExists(category)
+    }
 
     const payload = {
       itemType,
@@ -284,6 +305,7 @@ class VaultService {
 
     const username = itemType === 'password' ? input.username || '' : ''
     const email = itemType === 'password' ? input.email || '' : ''
+    const favorite = input.favorite ? 1 : 0
 
     if (input.id) {
       this.db.prepare(`
@@ -295,6 +317,7 @@ class VaultService {
           website = ?,
           category = ?,
           notes = ?,
+          favorite = ?,
           encrypted_payload = ?,
           updated_at = ?
         WHERE id = ?
@@ -303,8 +326,9 @@ class VaultService {
         username,
         email,
         input.website || '',
-        input.category || '',
+        category,
         input.notes || '',
+        favorite,
         encrypted,
         now,
         input.id
@@ -321,24 +345,45 @@ class VaultService {
         website,
         category,
         notes,
+        favorite,
         encrypted_payload,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.title.trim(),
       username,
       email,
       input.website || '',
-      input.category || '',
+      category,
       input.notes || '',
+      favorite,
       encrypted,
       now,
       now
     )
 
     return { success: true }
+  }
+
+  toggleFavorite(id) {
+    this.requireUnlocked()
+
+    const row = this.getCredentialRow(id)
+    const nextValue = row.favorite ? 0 : 1
+    const now = new Date().toISOString()
+
+    this.db.prepare(`
+      UPDATE credentials
+      SET favorite = ?, updated_at = ?
+      WHERE id = ?
+    `).run(nextValue, now, id)
+
+    return {
+      success: true,
+      favorite: Boolean(nextValue)
+    }
   }
 
   deleteCredential(id) {
@@ -350,6 +395,81 @@ class VaultService {
     `).run(id)
 
     return { success: true }
+  }
+
+  listCategories() {
+    this.requireUnlocked()
+
+    const rows = this.db.prepare(`
+      SELECT id, name, created_at, updated_at
+      FROM categories
+      ORDER BY LOWER(name) ASC
+    `).all()
+
+    return {
+      success: true,
+      categories: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }))
+    }
+  }
+
+  createCategory(name) {
+    this.requireUnlocked()
+
+    const categoryName = this.normalizeCategoryName(name)
+
+    if (!categoryName) {
+      throw new Error('Informe o nome da categoria.')
+    }
+
+    this.db.prepare(`
+      INSERT OR IGNORE INTO categories (name)
+      VALUES (?)
+    `).run(categoryName)
+
+    return {
+      success: true
+    }
+  }
+
+  deleteCategory(id) {
+    this.requireUnlocked()
+
+    const row = this.db.prepare(`
+      SELECT name
+      FROM categories
+      WHERE id = ?
+    `).get(id)
+
+    if (!row) {
+      throw new Error('Categoria não encontrada.')
+    }
+
+    const transaction = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE credentials
+        SET category = '', updated_at = ?
+        WHERE category = ?
+      `).run(
+        new Date().toISOString(),
+        row.name
+      )
+
+      this.db.prepare(`
+        DELETE FROM categories
+        WHERE id = ?
+      `).run(id)
+    })
+
+    transaction()
+
+    return {
+      success: true
+    }
   }
 
   buildBackupPayload() {
@@ -364,9 +484,16 @@ class VaultService {
       this.toCredentialFull(row)
     )
 
+    const categories = this.db.prepare(`
+      SELECT name
+      FROM categories
+      ORDER BY LOWER(name) ASC
+    `).all().map((row) => row.name)
+
     return {
-      version: 3,
+      version: 4,
       exportedAt: new Date().toISOString(),
+      categories,
       entries
     }
   }
@@ -421,6 +548,10 @@ class VaultService {
 
     let imported = 0
 
+    for (const categoryName of backup.categories || []) {
+      this.ensureCategoryExists(categoryName)
+    }
+
     for (const item of backup.entries || []) {
       this.saveCredential({
         title: item.title || 'Item importado',
@@ -429,6 +560,7 @@ class VaultService {
         website: item.website || '',
         category: item.category || '',
         notes: item.notes || '',
+        favorite: Boolean(item.favorite),
         itemType: this.normalizeItemType(item.itemType),
         password: item.password || '',
         secretText: item.secretText || ''

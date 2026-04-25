@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('vaulty', {
   revealPassword: (id) => ipcRenderer.invoke('vault:revealPassword', id),
   saveCredential: (payload) => ipcRenderer.invoke('vault:saveCredential', payload),
   deleteCredential: (id) => ipcRenderer.invoke('vault:deleteCredential', id),
+  toggleFavorite: (id) => ipcRenderer.invoke('vault:toggleFavorite', id),
+
+  listCategories: () => ipcRenderer.invoke('categories:list'),
+  createCategory: (name) => ipcRenderer.invoke('categories:create', name),
+  deleteCategory: (id) => ipcRenderer.invoke('categories:delete', id),
 
   exportBackup: () => ipcRenderer.invoke('vault:exportBackup'),
   importBackup: () => ipcRenderer.invoke('vault:importBackup'),

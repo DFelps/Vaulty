@@ -7,7 +7,7 @@ const { app } = require('electron')
 
 let db
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 function getDbPath() {
   const userData = app.getPath('userData')
@@ -16,6 +16,11 @@ function getDbPath() {
   fs.mkdirSync(dataDir, { recursive: true })
 
   return path.join(dataDir, 'vaulty.db')
+}
+
+function columnExists(database, tableName, columnName) {
+  const columns = database.pragma(`table_info(${tableName})`)
+  return columns.some((column) => column.name === columnName)
 }
 
 function migrateDatabase(database) {
@@ -44,8 +49,6 @@ function migrateDatabase(database) {
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
     `)
-
-    database.pragma('user_version = 1')
   }
 
   if (currentVersion < 2) {
@@ -56,9 +59,33 @@ function migrateDatabase(database) {
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
     `)
-
-    database.pragma('user_version = 2')
   }
+
+  if (currentVersion < 3) {
+    if (!columnExists(database, 'credentials', 'favorite')) {
+      database.exec(`
+        ALTER TABLE credentials
+        ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+      `)
+    }
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT OR IGNORE INTO categories (name)
+      SELECT DISTINCT TRIM(category)
+      FROM credentials
+      WHERE category IS NOT NULL
+        AND TRIM(category) <> '';
+    `)
+  }
+
+  database.pragma(`user_version = ${SCHEMA_VERSION}`)
 }
 
 function initializeDatabase() {
