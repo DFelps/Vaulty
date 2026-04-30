@@ -1,21 +1,21 @@
 # Vaulty
 
-Vaulty é um gerenciador de senhas e cofre digital local para desktop, desenvolvido com **Electron + Vue**.
+Vaulty is a local-first desktop password manager built with **Electron and Vue**.
 
-Todos os dados permanecem no dispositivo do usuário e são protegidos por **chave mestra**, **criptografia local** e controles de sessão.
+All data is stored on the user's device and protected using a **master key**, **local encryption**, and session-based security controls.
 
 ---
 
-## Recursos
+## Features
 
-- Cofre local protegido por chave mestra
-- Bloqueio automático por inatividade
-- Cadastro de senhas e textos seguros
-- Busca e categorias
-- Gerador de senha forte
-- Backup criptografado
-- Recovery Key
-- Integração Google Drive (opcional)
+- Local encrypted vault protected by a master key
+- Automatic lock on inactivity
+- Store passwords and secure notes
+- Search and category organization
+- Strong password generator
+- Encrypted backups
+- Recovery key support
+- Optional Google Drive backup integration
 
 ---
 
@@ -29,40 +29,10 @@ Todos os dados permanecem no dispositivo do usuário e são protegidos por **cha
 
 ---
 
-## Instalação
+## Installation
 
 ```bash
 git clone <repo-url>
-cd Vaulty
+cd vaulty
 npm install
 npm run dev
-```
-
-## Build
-
-```bash
-npm run dist
-```
-
-Saída:
-
-```text
-dist-electron/
-```
-
----
-
-## Segurança
-
-- Senha mestra não é salva em texto puro
-- Dados sensíveis criptografados em disco
-- Sessão limpa ao bloquear
-- Backup exportado criptografado
-
-> Se perder a senha mestra e a Recovery Key, não há recuperação.
-
----
-
-## Licença
-
-MIT
